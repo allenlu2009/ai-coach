@@ -1,10 +1,10 @@
 ## FEATURE:
 
-[Insert your feature here]
+Do a AI coach to analyze athelete's pose
 
 ## EXAMPLES:
 
-[Provide and explain examples that you have in the `examples/` folder]
+@examples/pose.py
 
 ## DOCUMENTATION:
 
@@ -12,4 +12,5 @@
 
 ## OTHER CONSIDERATIONS:
 
-[Any other considerations or specific requirements - great place to include gotchas that you see AI coding assistants miss with your projects a lot]
+use uv for project management and virtual environment
+I am using desktop GPU RTX 3060 with cuda, leverage it whenever is needed

@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Coach - Pose Analysis System</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-running"></i>
+                <h1>AI Coach</h1>
+            </div>
+            <nav class="nav">
+                <button id="helpBtn" class="nav-btn">
+                    <i class="fas fa-question-circle"></i>
+                    Help
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <!-- Upload Section -->
+            <section class="upload-section">
+                <div class="upload-card">
+                    <h2>Upload Your Movement Video</h2>
+                    <p>Upload a video of your exercise or movement for AI-powered pose analysis and coaching feedback.</p>
+                    
+                    <!-- Upload Form -->
+                    <div class="upload-form">
+                        <div id="dropZone" class="drop-zone">
+                            <div class="drop-zone-content">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <h3>Drag & Drop Your Video</h3>
+                                <p>or <button type="button" id="browseBtn" class="browse-btn">Browse Files</button></p>
+                                <small>Supports MP4, AVI, MOV • Max 100MB • Up to 5 minutes</small>
+                            </div>
+                            <input type="file" id="videoInput" accept="video/*" hidden>
+                        </div>
+                        
+                        <!-- Movement Type Selection -->
+                        <div class="movement-type">
+                            <label for="movementSelect">Movement Type:</label>
+                            <select id="movementSelect">
+                                <option value="general">General Movement</option>
+                                <option value="squat">Squat</option>
+                                <option value="deadlift">Deadlift</option>
+                                <option value="overhead_press">Overhead Press</option>
+                            </select>
+                        </div>
+                        
+                        <button id="uploadBtn" class="upload-btn" disabled>
+                            <i class="fas fa-upload"></i>
+                            Upload & Analyze
+                        </button>
+                    </div>
+                    
+                    <!-- Video Preview Section -->
+                    <div id="videoPreviewSection" class="video-preview-section hidden">
+                        <h3>Video Preview</h3>
+                        <div class="video-preview-container">
+                            <video id="previewVideo" class="preview-video" controls muted>
+                                Your browser does not support the video tag.
+                            </video>
+                            <div class="video-details">
+                                <div class="video-detail-item">
+                                    <span class="detail-label">File:</span>
+                                    <span id="previewFileName" class="detail-value">-</span>
+                                </div>
+                                <div class="video-detail-item">
+                                    <span class="detail-label">Size:</span>
+                                    <span id="previewFileSize" class="detail-value">-</span>
+                                </div>
+                                <div class="video-detail-item">
+                                    <span class="detail-label">Duration:</span>
+                                    <span id="previewDuration" class="detail-value">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analysis Section -->
+            <section id="analysisSection" class="analysis-section hidden">
+                <div class="analysis-grid">
+                    <!-- Progress Panel -->
+                    <div class="progress-panel">
+                        <h3>Analysis Progress</h3>
+                        <div class="progress-container">
+                            <div class="progress-bar">
+                                <div id="progressFill" class="progress-fill"></div>
+                            </div>
+                            <div id="progressText" class="progress-text">0%</div>
+                        </div>
+                        <div id="statusMessage" class="status-message">Preparing analysis...</div>
+                        
+                        <!-- Video Info -->
+                        <div id="videoInfo" class="video-info hidden">
+                            <h4>Video Information</h4>
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <span class="info-label">Duration:</span>
+                                    <span id="videoDuration" class="info-value">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">FPS:</span>
+                                    <span id="videoFPS" class="info-value">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Resolution:</span>
+                                    <span id="videoResolution" class="info-value">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Poses Detected:</span>
+                                    <span id="posesDetected" class="info-value">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Video Player -->
+                    <div class="video-panel">
+                        <h3>Pose Analysis Video</h3>
+                        <div class="video-container">
+                            <video id="analysisVideo" controls class="analysis-video">
+                                Your browser does not support the video tag.
+                            </video>
+                            <div id="videoPlaceholder" class="video-placeholder">
+                                <i class="fas fa-video"></i>
+                                <p>Analysis video will appear here</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Video Controls -->
+                        <div class="video-controls">
+                            <button id="downloadBtn" class="control-btn" disabled>
+                                <i class="fas fa-download"></i>
+                                Download Analysis
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Coaching Feedback -->
+                <div id="feedbackPanel" class="feedback-panel hidden">
+                    <h3>
+                        <i class="fas fa-clipboard-list"></i>
+                        Coaching Feedback
+                    </h3>
+                    
+                    <div class="feedback-content">
+                        <div class="feedback-summary">
+                            <h4>Analysis Summary</h4>
+                            <p id="feedbackSummary">-</p>
+                        </div>
+                        
+                        <div class="feedback-grid">
+                            <div class="feedback-section">
+                                <h4>
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    Key Issues
+                                </h4>
+                                <ul id="keyIssues" class="feedback-list">
+                                    <li>Loading...</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="feedback-section">
+                                <h4>
+                                    <i class="fas fa-lightbulb"></i>
+                                    Improvement Suggestions
+                                </h4>
+                                <ul id="suggestions" class="feedback-list">
+                                    <li>Loading...</li>
+                                </ul>
+                            </div>
+                        </div>
+                        
+                        <!-- Technical Metrics -->
+                        <div class="metrics-section">
+                            <h4>
+                                <i class="fas fa-chart-bar"></i>
+                                Technical Metrics
+                            </h4>
+                            <div class="metrics-grid">
+                                <div class="metric-item">
+                                    <span class="metric-label">Movement Smoothness</span>
+                                    <div class="metric-bar">
+                                        <div id="smoothnessBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="smoothnessValue" class="metric-value">-</span>
+                                </div>
+                                
+                                <div class="metric-item">
+                                    <span class="metric-label">Posture Stability</span>
+                                    <div class="metric-bar">
+                                        <div id="stabilityBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="stabilityValue" class="metric-value">-</span>
+                                </div>
+                                
+                                <div class="metric-item">
+                                    <span class="metric-label">Balance Score</span>
+                                    <div class="metric-bar">
+                                        <div id="balanceBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="balanceValue" class="metric-value">-</span>
+                                </div>
+                                
+                                <div class="metric-item">
+                                    <span class="metric-label">Symmetry Score</span>
+                                    <div class="metric-bar">
+                                        <div id="symmetryBar" class="metric-fill"></div>
+                                    </div>
+                                    <span id="symmetryValue" class="metric-value">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Chat Section -->
+            <section class="chat-section">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>
+                            <i class="fas fa-comments"></i>
+                            Chat with AI Coach
+                        </h3>
+                        <div class="chat-status">
+                            <div id="connectionStatus" class="status-indicator offline"></div>
+                            <span id="connectionText">Connecting...</span>
+                        </div>
+                    </div>
+                    
+                    <div id="chatMessages" class="chat-messages">
+                        <!-- Messages will be added here dynamically -->
+                    </div>
+                    
+                    <div class="chat-input-container">
+                        <div class="chat-input-wrapper">
+                            <input 
+                                type="text" 
+                                id="chatInput" 
+                                placeholder="Ask me about your movement, technique, or get coaching tips..."
+                                maxlength="500"
+                            >
+                            <button id="sendBtn" class="send-btn" disabled>
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                        <div class="chat-suggestions">
+                            <button class="suggestion-btn" data-message="How can I improve my form?">
+                                How can I improve my form?
+                            </button>
+                            <button class="suggestion-btn" data-message="What are the main issues you see?">
+                                What are the main issues?
+                            </button>
+                            <button class="suggestion-btn" data-message="Can you explain the technical metrics?">
+                                Explain the metrics
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 AI Coach - Pose Analysis System. Powered by MediaPipe & FastAPI.</p>
+        </div>
+    </footer>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p id="loadingText">Processing your video...</p>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="errorModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-exclamation-circle"></i>
+                    Error
+                </h3>
+                <button id="closeErrorBtn" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="errorMessage">An error occurred. Please try again.</p>
+            </div>
+            <div class="modal-footer">
+                <button id="errorOkBtn" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-question-circle"></i>
+                    How to Use AI Coach
+                </h3>
+                <button id="closeHelpBtn" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="help-section">
+                    <h4>Getting Started</h4>
+                    <ol>
+                        <li>Upload a video of your exercise or movement</li>
+                        <li>Select the movement type for specialized analysis</li>
+                        <li>Wait for the AI to analyze your pose and movement</li>
+                        <li>Review the coaching feedback and technical metrics</li>
+                        <li>Chat with the AI coach for personalized advice</li>
+                    </ol>
+                </div>
+                
+                <div class="help-section">
+                    <h4>Video Requirements</h4>
+                    <ul>
+                        <li>Clear view of your full body</li>
+                        <li>Good lighting conditions</li>
+                        <li>Stable camera position</li>
+                        <li>Maximum file size: 100MB</li>
+                        <li>Supported formats: MP4, AVI, MOV</li>
+                    </ul>
+                </div>
+                
+                <div class="help-section">
+                    <h4>Analysis Features</h4>
+                    <ul>
+                        <li><strong>Pose Detection:</strong> 33 3D landmarks tracked</li>
+                        <li><strong>Movement Metrics:</strong> Smoothness, balance, symmetry</li>
+                        <li><strong>Coaching Feedback:</strong> Personalized improvement tips</li>
+                        <li><strong>Video Overlay:</strong> Visual pose analysis</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
