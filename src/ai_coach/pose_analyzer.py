@@ -368,7 +368,7 @@ class PoseAnalyzer:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
             # Create video writer
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use mp4v, convert to H.264 afterward
             out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
             
             frame_number = 0
@@ -413,6 +413,31 @@ class PoseAnalyzer:
             
             cap.release()
             out.release()
+            
+            # Convert to H.264 for better browser compatibility
+            temp_path = str(output_path).replace('.mp4', '_temp.mp4')
+            import subprocess
+            try:
+                subprocess.run([
+                    'ffmpeg', '-i', str(output_path), 
+                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                    '-y', temp_path
+                ], check=True, capture_output=True)
+                
+                # Replace original with H.264 version
+                import os
+                os.replace(temp_path, str(output_path))
+                logger.info(f"Converted to H.264: {output_path}")
+                
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"H.264 conversion failed, keeping original: {e}")
+                # Clean up temp file if it exists
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+            except Exception as e:
+                logger.warning(f"H.264 conversion error: {e}")
             
             logger.info(f"Pose overlay video created: {output_path}")
             return True

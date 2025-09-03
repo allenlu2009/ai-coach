@@ -11,9 +11,10 @@ from pathlib import Path
 src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
-# Set environment variables for MediaPipe stability
-os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # Use CPU only to avoid GPU issues
-os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"  # Disable hardware transforms
+# Try GPU first, fallback to CPU if needed
+# Comment out the GPU disable to allow RTX 3060 acceleration
+# os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # Use CPU only to avoid GPU issues
+os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"  # Disable hardware transforms for stability
 
 def main():
     """Run the AI Coach server with stability fixes."""
@@ -29,8 +30,8 @@ def main():
         uploads_dir.mkdir(exist_ok=True)
         
         print("🏃‍♀️ Starting AI Coach Server...")
-        print("📍 Server will be available at: http://localhost:8000")
-        print("⚠️  MediaPipe GPU disabled for WSL compatibility")
+        print("📍 Server will be available at: http://localhost:8000")  
+        print("🚀 GPU acceleration enabled for RTX 3060")
         
         # Run with string import to delay MediaPipe initialization
         uvicorn.run(

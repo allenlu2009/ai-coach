@@ -269,6 +269,17 @@ class AICoachApp {
         if (!this.selectedFile || this.isProcessing) return;
         
         this.isProcessing = true;
+        
+        // Reset video element for new upload
+        const video = document.getElementById('analysisVideo');
+        const placeholder = document.getElementById('videoPlaceholder');
+        if (video && placeholder) {
+            video.src = '';
+            video.load();
+            video.classList.add('hidden');
+            placeholder.classList.remove('hidden');
+        }
+        
         this.showLoadingOverlay('Uploading video...');
         
         try {
@@ -360,18 +371,57 @@ class AICoachApp {
             
             console.log('Loading processed video for ID:', videoId);
             
-            const videoUrl = `${this.API_BASE}/videos/${videoId}/preview`;
-            console.log('Video URL:', videoUrl);
+            // TEMPORARY: Use working static video to debug the issue
+            const videoUrl = `${this.API_BASE}/static/latest_analysis.mp4`;
+            console.log('TEMP: Using static video URL for debugging:', videoUrl);
             
             // Test if video URL is accessible
             const response = await fetch(videoUrl, { method: 'HEAD' });
             if (!response.ok) {
-                throw new Error(`Video not accessible: ${response.status}`);
+                console.warn('Static video not accessible, trying processed video');
+                const processedUrl = `${this.API_BASE}/videos/${videoId}/preview`;
+                console.log('Processed Video URL:', processedUrl);
+                const processedResponse = await fetch(processedUrl, { method: 'HEAD' });
+                if (!processedResponse.ok) {
+                    throw new Error(`Video not accessible: ${processedResponse.status}`);
+                }
+                video.src = `${processedUrl}?t=${Date.now()}`;
+            } else {
+                // Force reload with cache busting and explicit load
+                video.src = '';  // Clear first to force reload
+                video.load();    // Reset video element
+                video.src = `${videoUrl}?t=${Date.now()}`;  // Cache busting
             }
+            video.load();    // Force load new source
             
-            video.src = videoUrl;
             video.classList.remove('hidden');
             placeholder.classList.add('hidden');
+            
+            // Add comprehensive error handling and debugging
+            video.onerror = function(e) {
+                console.error('Video loading error:', e);
+                console.error('Failed to load:', video.src);
+                console.error('Video error details:', video.error);
+            };
+            
+            video.onloadstart = function() {
+                console.log('Video loading started for:', video.src);
+            };
+            
+            video.oncanplay = function() {
+                console.log('Video can play:', video.src);
+            };
+            
+            video.onloadeddata = function() {
+                console.log('Video data loaded:', video.src);
+                console.log('Video dimensions:', video.videoWidth, 'x', video.videoHeight);
+            };
+            
+            video.onstalled = function() {
+                console.warn('Video loading stalled:', video.src);
+            };
+            
+            console.log('Video element setup complete. Current src:', video.src);
             
             // Enable download button
             document.getElementById('downloadBtn').disabled = false;

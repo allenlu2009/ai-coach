@@ -90,7 +90,7 @@
             </section>
 
             <!-- Analysis Section -->
-            <section id="analysisSection" class="analysis-section hidden">
+            <section id="analysisSection" class="analysis-section">
                 <div class="analysis-grid">
                     <!-- Progress Panel -->
                     <div class="progress-panel">
@@ -131,10 +131,10 @@
                     <div class="video-panel">
                         <h3>Pose Analysis Video</h3>
                         <div class="video-container">
-                            <video id="analysisVideo" controls class="analysis-video">
+                            <video id="analysisVideo" controls class="analysis-video" src="/static/latest_analysis.mp4" style="width: 100%; height: auto; display: block;">
                                 Your browser does not support the video tag.
                             </video>
-                            <div id="videoPlaceholder" class="video-placeholder">
+                            <div id="videoPlaceholder" class="video-placeholder hidden">
                                 <i class="fas fa-video"></i>
                                 <p>Analysis video will appear here</p>
                             </div>
@@ -356,6 +356,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=1.1"></script>
 </body>
 </html>

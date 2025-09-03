@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 from datetime import datetime
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -307,8 +307,8 @@ def create_app(uploads_dir: str = "uploads") -> FastAPI:
             logger.error(f"Error generating feedback for {video_id}: {e}")
             raise HTTPException(status_code=500, detail="Failed to generate coaching feedback")
     
-    @app.get("/videos/{video_id}/preview")
-    async def get_video_preview(video_id: str):
+    @app.api_route("/videos/{video_id}/preview", methods=["GET", "HEAD"])
+    async def get_video_preview(request: Request, video_id: str):
         """
         Get processed video with pose overlay visualization.
         
@@ -325,7 +325,17 @@ def create_app(uploads_dir: str = "uploads") -> FastAPI:
             if not processed_path or not processed_path.exists():
                 raise HTTPException(status_code=404, detail="Processed video not found")
             
-            # Return video file
+            # Handle HEAD request - just return headers without body
+            if request.method == "HEAD":
+                return JSONResponse(
+                    content={},
+                    headers={
+                        "Content-Type": "video/mp4",
+                        "Content-Length": str(processed_path.stat().st_size)
+                    }
+                )
+            
+            # Return video file for GET request
             return FileResponse(
                 path=str(processed_path),
                 media_type="video/mp4",
