@@ -647,8 +647,9 @@ class AICoachApp {
     downloadAnalysis() {
         if (!this.currentVideoId) return;
         
+        // Use the dedicated download endpoint
         const link = document.createElement('a');
-        link.href = `${this.API_BASE}/videos/${this.currentVideoId}/preview`;
+        link.href = `${this.API_BASE}/videos/${this.currentVideoId}/download`;
         link.download = `pose_analysis_${this.currentVideoId}.mp4`;
         document.body.appendChild(link);
         link.click();

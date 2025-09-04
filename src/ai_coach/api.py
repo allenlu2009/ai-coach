@@ -335,11 +335,14 @@ def create_app(uploads_dir: str = "uploads") -> FastAPI:
                     }
                 )
             
-            # Return video file for GET request
+            # Return video file for GET request with proper headers for streaming
             return FileResponse(
                 path=str(processed_path),
                 media_type="video/mp4",
-                filename=f"{video_id}_analysis.mp4"
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-cache"
+                }
             )
             
         except HTTPException:
@@ -347,6 +350,41 @@ def create_app(uploads_dir: str = "uploads") -> FastAPI:
         except Exception as e:
             logger.error(f"Error serving video preview for {video_id}: {e}")
             raise HTTPException(status_code=500, detail="Failed to serve video preview")
+    
+    @app.get("/videos/{video_id}/download")
+    async def download_video(video_id: str):
+        """
+        Download processed video with pose overlay visualization.
+        
+        Args:
+            video_id: Unique video identifier
+            
+        Returns:
+            Video file download response
+        """
+        try:
+            # Get processed video path
+            processed_path = await video_processor.get_processed_video_path(video_id)
+            
+            if not processed_path or not processed_path.exists():
+                raise HTTPException(status_code=404, detail="Processed video not found")
+            
+            # Return video file for download with proper filename
+            return FileResponse(
+                path=str(processed_path),
+                media_type="video/mp4",
+                filename=f"{video_id}_pose_analysis.mp4",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{video_id}_pose_analysis.mp4"',
+                    "Accept-Ranges": "bytes"
+                }
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error downloading video for {video_id}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to download video")
     
     @app.websocket("/chat/{session_id}")
     async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):

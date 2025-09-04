@@ -434,6 +434,24 @@ class PoseAnalyzer:
                 os.replace(temp_path, str(output_path))
                 logger.info(f"Pose overlay video converted to H.264: {output_path}")
                 
+                # Create a copy in pose_analysis_videos folder for easy access
+                try:
+                    pose_videos_dir = Path("pose_analysis_videos")
+                    pose_videos_dir.mkdir(exist_ok=True)
+                    
+                    # Create a descriptive filename
+                    video_filename = Path(output_path).stem.replace("_processed", "_pose_analysis_h264")
+                    copy_path = pose_videos_dir / f"{video_filename}.mp4"
+                    
+                    # Copy the H.264 video to pose_analysis_videos folder
+                    import shutil
+                    shutil.copy2(str(output_path), str(copy_path))
+                    logger.info(f"Created copy in pose_analysis_videos: {copy_path}")
+                    
+                except Exception as copy_error:
+                    logger.warning(f"Failed to copy to pose_analysis_videos: {copy_error}")
+                    # Don't fail the whole process if copy fails
+                
             except subprocess.CalledProcessError as e:
                 logger.error(f"H.264 conversion failed: {e}")
                 # Clean up temp file if it exists
