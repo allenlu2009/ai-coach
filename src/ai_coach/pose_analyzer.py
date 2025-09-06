@@ -440,16 +440,17 @@ class PoseAnalyzer:
             try:
                 logger.info(f"🎬 Converting {temp_output_path} to {output_path}")
                 
-                # Use FFmpeg to create browser-compatible video with optimized settings
+                # Use FFmpeg to create browser-compatible video with ultra-conservative settings
                 result = subprocess.run([
                     'ffmpeg', '-i', temp_output_path,
                     '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    '-crf', '23', 
+                    '-profile:v', 'baseline',     # Baseline profile for maximum compatibility
+                    '-level', '3.0',             # Lower level for broader compatibility
                     '-pix_fmt', 'yuv420p',
-                    '-profile:v', 'baseline',  # Use baseline profile for maximum compatibility
-                    '-level', '3.1',          # Compatible level
-                    '-movflags', '+faststart', # Optimize for web streaming
+                    '-crf', '28',                # Higher CRF (lower quality) for stability
+                    '-preset', 'ultrafast',      # Fastest encoding for simpler output
+                    '-movflags', '+faststart',   # Optimize for web streaming
+                    '-avoid_negative_ts', 'make_zero',  # Fix timestamp issues
                     '-y', str(output_path)
                 ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
                 

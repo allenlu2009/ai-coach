@@ -433,7 +433,10 @@ class AICoachApp {
                     console.error('Error code:', video.error.code);
                     console.error('Error message:', video.error.message);
                 }
-            };
+                
+                // Show fallback message with option to open video in new tab
+                this.showVideoFallback(videoUrl, videoId);
+            }.bind(this);
             
             video.onloadstart = function() {
                 console.log('🔄 Video loading started for:', video.src);
@@ -500,6 +503,55 @@ class AICoachApp {
             
         } catch (error) {
             console.error('❌ Error loading processed video:', error);
+        }
+    }
+    
+    showVideoFallback(videoUrl, videoId) {
+        console.log('🔄 Showing video fallback options');
+        
+        const video = document.getElementById('analysisVideo');
+        const placeholder = document.getElementById('videoPlaceholder');
+        
+        // Hide broken video element, show placeholder with fallback options
+        video.style.display = 'none';
+        if (placeholder) {
+            placeholder.style.display = 'block';
+            placeholder.classList.remove('hidden');
+            placeholder.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <i class="fas fa-exclamation-triangle" style="color: #f39c12; font-size: 48px; margin-bottom: 15px;"></i>
+                    <h4 style="color: #e74c3c; margin-bottom: 15px;">Video Display Issue</h4>
+                    <p style="margin-bottom: 20px;">The video element cannot play the analysis video due to browser compatibility issues.</p>
+                    <div style="margin-bottom: 15px;">
+                        <button id="openVideoTab" class="btn btn-primary" style="margin-right: 10px;">
+                            <i class="fas fa-external-link-alt"></i> Open Video in New Tab
+                        </button>
+                        <button id="retryVideo" class="btn btn-secondary">
+                            <i class="fas fa-redo"></i> Retry Loading
+                        </button>
+                    </div>
+                    <small style="color: #7f8c8d;">
+                        The video works correctly in a separate tab. This is a known browser limitation with certain video formats.
+                    </small>
+                </div>
+            `;
+            
+            // Add event listeners for fallback buttons
+            document.getElementById('openVideoTab').addEventListener('click', () => {
+                console.log('🔗 Opening video in new tab:', videoUrl);
+                window.open(videoUrl, '_blank');
+            });
+            
+            document.getElementById('retryVideo').addEventListener('click', () => {
+                console.log('🔄 Retrying video load');
+                location.reload(); // Simple retry by reloading page
+            });
+        }
+        
+        // Still enable download button since that works
+        const downloadBtn = document.getElementById('downloadBtn');
+        if (downloadBtn) {
+            downloadBtn.disabled = false;
         }
     }
     
