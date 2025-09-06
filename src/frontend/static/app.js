@@ -382,60 +382,124 @@ class AICoachApp {
             const video = document.getElementById('analysisVideo');
             const placeholder = document.getElementById('videoPlaceholder');
             
+            if (!video) {
+                throw new Error('Video element not found');
+            }
+            
             console.log('Loading processed video for ID:', videoId);
+            console.log('Video element found:', video);
+            console.log('Placeholder element found:', placeholder);
             
             // Use the actual processed video for this specific video ID
             const videoUrl = `${this.API_BASE}/videos/${videoId}/preview`;
             console.log('Loading processed video URL:', videoUrl);
             
-            // Test if video URL is accessible
-            const response = await fetch(videoUrl, { method: 'HEAD' });
-            if (!response.ok) {
-                throw new Error(`Video not accessible: ${response.status}`);
+            // Test if video URL is accessible with retry mechanism
+            let response;
+            let retries = 0;
+            const maxRetries = 30;  // Increased to 30 for longer video processing times
+            
+            while (retries < maxRetries) {
+                response = await fetch(videoUrl, { method: 'HEAD' });
+                if (response.ok) {
+                    console.log('✅ HEAD request successful');
+                    break;
+                }
+                
+                retries++;
+                console.log(`🔄 HEAD request failed (${response.status}), retrying... (${retries}/${maxRetries})`);
+                
+                if (retries < maxRetries) {
+                    // Wait 5 seconds before retry (increased for longer video processing)
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                } else {
+                    throw new Error(`Video not accessible after ${maxRetries} retries: ${response.status}`);
+                }
             }
             
-            // Force reload with cache busting and explicit load
-            video.src = '';  // Clear first to force reload
-            video.load();    // Reset video element
-            video.src = `${videoUrl}?t=${Date.now()}`;  // Cache busting
-            video.load();    // Force load new source
+            // Clear any existing event handlers
+            video.onerror = null;
+            video.onloadstart = null;
+            video.oncanplay = null;
+            video.onloadeddata = null;
+            video.onstalled = null;
             
-            video.classList.remove('hidden');
-            placeholder.classList.add('hidden');
-            
-            // Add comprehensive error handling and debugging
+            // Set up event handlers BEFORE setting source
             video.onerror = function(e) {
-                console.error('Video loading error:', e);
+                console.error('❌ Video loading error:', e);
                 console.error('Failed to load:', video.src);
                 console.error('Video error details:', video.error);
+                if (video.error) {
+                    console.error('Error code:', video.error.code);
+                    console.error('Error message:', video.error.message);
+                }
             };
             
             video.onloadstart = function() {
-                console.log('Video loading started for:', video.src);
+                console.log('🔄 Video loading started for:', video.src);
             };
             
             video.oncanplay = function() {
-                console.log('Video can play:', video.src);
+                console.log('✅ Video can play:', video.src);
+                console.log('Video ready state:', video.readyState);
+                console.log('Video network state:', video.networkState);
             };
             
             video.onloadeddata = function() {
-                console.log('Video data loaded:', video.src);
+                console.log('✅ Video data loaded:', video.src);
                 console.log('Video dimensions:', video.videoWidth, 'x', video.videoHeight);
+                console.log('Video duration:', video.duration);
             };
             
             video.onstalled = function() {
-                console.warn('Video loading stalled:', video.src);
+                console.warn('⚠️ Video loading stalled:', video.src);
             };
             
-            console.log('Video element setup complete. Current src:', video.src);
+            video.onloadedmetadata = function() {
+                console.log('📊 Video metadata loaded');
+                console.log('Duration:', video.duration);
+                console.log('Dimensions:', video.videoWidth, 'x', video.videoHeight);
+            };
+            
+            // Force clear and reload
+            console.log('🔄 Clearing video source...');
+            video.removeAttribute('src');
+            video.load();
+            
+            // Set new source with cache busting
+            const cacheBustedUrl = `${videoUrl}?t=${Date.now()}`;
+            console.log('🎥 Setting video source to:', cacheBustedUrl);
+            video.src = cacheBustedUrl;
+            
+            // Show video, hide placeholder
+            console.log('👁️ Making video visible...');
+            video.classList.remove('hidden');
+            video.style.display = 'block';  // Force display
+            
+            if (placeholder) {
+                placeholder.classList.add('hidden');
+                placeholder.style.display = 'none';  // Force hide
+            }
+            
+            // Force load
+            video.load();
+            
+            console.log('📋 Video element current state:');
+            console.log('- src:', video.src);
+            console.log('- readyState:', video.readyState);
+            console.log('- networkState:', video.networkState);
+            console.log('- classList:', video.classList.toString());
+            console.log('- style.display:', video.style.display);
+            console.log('- offsetWidth:', video.offsetWidth);
+            console.log('- offsetHeight:', video.offsetHeight);
             
             // Enable download button
             document.getElementById('downloadBtn').disabled = false;
             
-            console.log('✅ Video loaded successfully');
+            console.log('✅ Video setup complete');
             
         } catch (error) {
-            console.error('Error loading processed video:', error);
+            console.error('❌ Error loading processed video:', error);
         }
     }
     

@@ -17,7 +17,22 @@
       "Bash(python -m pytest:*)",
       "Bash(python3 -m pytest:*)",
       "WebFetch(domain:docs.anthropic.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(git restore:*)",
+      "Bash(ffprobe:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_file_upload",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_select_option",
+      "mcp__playwright__browser_console_messages",
+      "Bash(ffmpeg:*)",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_evaluate",
+      "Bash(ffplay:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

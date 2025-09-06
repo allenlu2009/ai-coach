@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Test</title>
+</head>
+<body>
+    <h1>Video Codec Test</h1>
+    <video id="testVideo" controls width="640" height="480">
+        <source src="http://localhost:8000/videos/c189af64-b0b5-485f-976b-f08794c5132d/preview" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    
+    <script>
+        const video = document.getElementById('testVideo');
+        
+        video.addEventListener('loadstart', () => console.log('loadstart'));
+        video.addEventListener('loadedmetadata', () => console.log('loadedmetadata'));
+        video.addEventListener('loadeddata', () => console.log('loadeddata'));
+        video.addEventListener('canplay', () => console.log('canplay'));
+        video.addEventListener('canplaythrough', () => console.log('canplaythrough'));
+        video.addEventListener('error', (e) => {
+            console.log('Video error:', e);
+            if (video.error) {
+                console.log('Error code:', video.error.code);
+                console.log('Error message:', video.error.message);
+            }
+        });
+    </script>
+</body>
+</html>

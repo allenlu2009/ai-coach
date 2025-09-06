@@ -215,13 +215,16 @@ class VideoProcessor:
             # Save analysis results
             await self._save_analysis_results(analysis)
             
-            # Update job status
+            # Create processed video with pose overlay BEFORE marking as complete
+            if analysis.status == ProcessingStatus.COMPLETED:
+                logger.info(f"🎬 Analysis completed, creating processed video for {video_id}")
+                await self._create_processed_video(video_path, analysis)
+            else:
+                logger.warning(f"⚠️ Analysis not completed, skipping video creation. Status: {analysis.status}")
+            
+            # Update job status AFTER video creation is complete
             self.active_jobs[video_id]["status"] = ProcessingStatus.COMPLETED
             self.active_jobs[video_id]["progress"] = 100.0
-            
-            # Create processed video with pose overlay
-            if analysis.status == ProcessingStatus.COMPLETED:
-                await self._create_processed_video(video_path, analysis)
             
             logger.info(f"Video analysis completed: {video_id}")
             return analysis
@@ -278,9 +281,12 @@ class VideoProcessor:
     async def _create_processed_video(self, video_path: str, analysis: VideoAnalysis) -> None:
         """Create processed video with pose overlay."""
         try:
+            logger.info(f"🎥 Starting processed video creation for {analysis.video_id}")
             processed_path = self.processed_dir / f"{analysis.video_id}_processed.mp4"
+            logger.info(f"📁 Target processed path: {processed_path}")
             
             # Create pose overlay video (this is CPU intensive, run in thread pool)
+            logger.info(f"🔄 Running pose overlay creation in executor...")
             success = await asyncio.get_event_loop().run_in_executor(
                 None,
                 self.pose_analyzer.create_pose_overlay_video,
@@ -288,6 +294,8 @@ class VideoProcessor:
                 str(processed_path),
                 analysis
             )
+            
+            logger.info(f"🔄 Pose overlay creation result: {success}")
             
             if success:
                 logger.info(f"Processed video created: {processed_path}")

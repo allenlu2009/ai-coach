@@ -363,8 +363,11 @@ class PoseAnalyzer:
             True if successful, False otherwise
         """
         try:
+            logger.info(f"🎬 Starting pose overlay video creation: {output_path}")
+            
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
+                logger.error(f"❌ Cannot open input video: {video_path}")
                 return False
             
             # Get video properties
@@ -372,9 +375,18 @@ class PoseAnalyzer:
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
-            # Create video writer - use mp4v initially, then convert to H.264 with FFmpeg
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use mp4v as fallback
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            logger.info(f"📊 Video properties: {width}x{height} @ {fps}fps")
+            
+            # Create video writer - skip OpenCV VideoWriter and use FFmpeg directly
+            temp_output_path = str(output_path).replace('.mp4', '_temp.avi')
+            logger.info(f"📁 Creating temp AVI: {temp_output_path}")
+            
+            fourcc = cv2.VideoWriter_fourcc(*'MJPG')  # Use MJPG for reliable OpenCV output
+            out = cv2.VideoWriter(temp_output_path, fourcc, fps, (width, height))
+            
+            if not out.isOpened():
+                logger.error(f"❌ Cannot create output video writer")
+                return False
             
             frame_number = 0
             
@@ -419,20 +431,48 @@ class PoseAnalyzer:
             cap.release()
             out.release()
             
-            # Convert to H.264 for browser compatibility using FFmpeg
-            temp_path = str(output_path).replace('.mp4', '_temp.mp4')
+            logger.info(f"✅ AVI creation complete: {temp_output_path}")
+            logger.info(f"📊 AVI file size: {Path(temp_output_path).stat().st_size} bytes")
+            
+            # Convert MJPG AVI to browser-compatible H.264 MP4 using FFmpeg
             import subprocess
+            import os
             try:
-                subprocess.run([
-                    'ffmpeg', '-i', str(output_path), 
-                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
-                    '-y', temp_path
-                ], check=True, capture_output=True)
+                logger.info(f"🎬 Converting {temp_output_path} to {output_path}")
                 
-                # Replace original with H.264 version
-                import os
-                os.replace(temp_path, str(output_path))
-                logger.info(f"Pose overlay video converted to H.264: {output_path}")
+                # Use FFmpeg to create browser-compatible video with optimized settings
+                result = subprocess.run([
+                    'ffmpeg', '-i', temp_output_path,
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-crf', '23', 
+                    '-pix_fmt', 'yuv420p',
+                    '-profile:v', 'baseline',  # Use baseline profile for maximum compatibility
+                    '-level', '3.1',          # Compatible level
+                    '-movflags', '+faststart', # Optimize for web streaming
+                    '-y', str(output_path)
+                ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
+                
+                # Check FFmpeg result explicitly
+                if result.returncode != 0:
+                    logger.error(f"❌ FFmpeg failed with return code {result.returncode}")
+                    logger.error(f"FFmpeg stdout: {result.stdout}")
+                    logger.error(f"FFmpeg stderr: {result.stderr}")
+                    return False
+                
+                logger.info(f"✅ FFmpeg conversion successful")
+                
+                # Verify output file was created
+                if not Path(output_path).exists():
+                    logger.error(f"❌ Output file not created: {output_path}")
+                    return False
+                    
+                output_size = Path(output_path).stat().st_size
+                logger.info(f"📊 Output file size: {output_size} bytes")
+                
+                # Clean up temporary AVI file
+                os.remove(temp_output_path)
+                logger.info(f"Pose overlay video converted to browser-compatible H.264: {output_path}")
                 
                 # Create a copy in pose_analysis_videos folder for easy access
                 try:
@@ -453,10 +493,12 @@ class PoseAnalyzer:
                     # Don't fail the whole process if copy fails
                 
             except subprocess.CalledProcessError as e:
-                logger.error(f"H.264 conversion failed: {e}")
-                # Clean up temp file if it exists
+                logger.error(f"💥 H.264 conversion failed: {e}")
+                logger.error(f"FFmpeg stdout: {e.stdout}")
+                logger.error(f"FFmpeg stderr: {e.stderr}")
+                # Clean up temp files if they exist
                 try:
-                    os.remove(temp_path)
+                    os.remove(temp_output_path)
                 except:
                     pass
                 return False

@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -308,7 +308,7 @@ def create_app(uploads_dir: str = "uploads") -> FastAPI:
             raise HTTPException(status_code=500, detail="Failed to generate coaching feedback")
     
     @app.api_route("/videos/{video_id}/preview", methods=["GET", "HEAD"])
-    async def get_video_preview(request: Request, video_id: str):
+    async def get_video_preview(video_id: str):
         """
         Get processed video with pose overlay visualization.
         
@@ -319,36 +319,47 @@ def create_app(uploads_dir: str = "uploads") -> FastAPI:
             Video file response with pose landmarks overlay
         """
         try:
+            logger.info(f"🎥 Video preview request for {video_id}")
+            
             # Get processed video path
             processed_path = await video_processor.get_processed_video_path(video_id)
+            logger.info(f"📁 Resolved path: {processed_path}")
             
-            if not processed_path or not processed_path.exists():
-                raise HTTPException(status_code=404, detail="Processed video not found")
+            if not processed_path:
+                logger.error(f"❌ No path resolved for {video_id}")
+                raise HTTPException(status_code=404, detail="Processed video path not found")
             
-            # Handle HEAD request - just return headers without body
-            if request.method == "HEAD":
-                return JSONResponse(
-                    content={},
-                    headers={
-                        "Content-Type": "video/mp4",
-                        "Content-Length": str(processed_path.stat().st_size)
-                    }
-                )
+            if not processed_path.exists():
+                logger.error(f"❌ File does not exist: {processed_path}")
+                raise HTTPException(status_code=404, detail="Processed video file not found")
             
-            # Return video file for GET request with proper headers for streaming
-            return FileResponse(
-                path=str(processed_path),
-                media_type="video/mp4",
-                headers={
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "no-cache"
-                }
+            logger.info(f"✅ Video file found: {processed_path} ({processed_path.stat().st_size} bytes)")
+            
+            # Return streaming response with proper headers for inline video playback
+            def generate_video_stream():
+                with open(processed_path, "rb") as video_file:
+                    while chunk := video_file.read(8192):  # 8KB chunks
+                        yield chunk
+            
+            # Use StreamingResponse to avoid Content-Disposition: attachment header
+            from fastapi.responses import StreamingResponse
+            response = StreamingResponse(
+                generate_video_stream(),
+                media_type="video/mp4"
             )
+            
+            # Set proper headers for video streaming
+            file_size = processed_path.stat().st_size
+            response.headers["Content-Length"] = str(file_size)
+            response.headers["Accept-Ranges"] = "bytes"
+            response.headers["Cache-Control"] = "no-cache"
+            
+            return response
             
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error serving video preview for {video_id}: {e}")
+            logger.error(f"💥 Error serving video preview for {video_id}: {e}")
             raise HTTPException(status_code=500, detail="Failed to serve video preview")
     
     @app.get("/videos/{video_id}/download")
