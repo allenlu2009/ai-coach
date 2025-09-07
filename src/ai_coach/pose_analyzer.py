@@ -10,6 +10,7 @@ import mediapipe as mp
 import numpy as np
 import time
 import logging
+import subprocess
 from typing import Optional, List, Tuple, Dict, Any
 from pathlib import Path
 
@@ -38,7 +39,7 @@ class PoseAnalyzer:
     comprehensive analysis results optimized for RTX 3060 GPU usage.
     """
     
-    def __init__(self, use_gpu: bool = True, model_complexity: int = 2, use_gpu_encoding: bool = False):
+    def __init__(self, use_gpu: bool = True, model_complexity: int = 2, use_gpu_encoding: bool = False, frame_skip: int = 3):
         """
         Initialize the pose analyzer.
         
@@ -47,10 +48,12 @@ class PoseAnalyzer:
             model_complexity: MediaPipe model complexity (0, 1, or 2)
                              2 = highest accuracy, best for coaching
             use_gpu_encoding: Whether to use GPU acceleration for FFmpeg video encoding
+            frame_skip: Analyze every Nth frame for 3x speedup (default: 3 for 30fps→10fps analysis)
         """
         self.use_gpu = use_gpu and self._check_gpu_availability()
         self.use_gpu_encoding = use_gpu_encoding and self._check_nvenc_availability()
         self.model_complexity = model_complexity
+        self.frame_skip = max(1, frame_skip)  # Ensure at least 1 (no skipping)
         
         # Initialize MediaPipe components
         self.mp_pose = mp.solutions.pose
@@ -74,7 +77,7 @@ class PoseAnalyzer:
             "gpu_memory_peak": 0.0
         }
         
-        logger.info(f"PoseAnalyzer initialized - GPU: {self.use_gpu}, Complexity: {model_complexity}")
+        logger.info(f"PoseAnalyzer initialized - GPU: {self.use_gpu}, Complexity: {model_complexity}, Frame Skip: {self.frame_skip}")
     
     def _check_gpu_availability(self) -> bool:
         """Check if GPU is available for acceleration."""
@@ -99,8 +102,6 @@ class PoseAnalyzer:
     
     def _check_nvenc_availability(self) -> bool:
         """Check if NVIDIA NVENC GPU encoding is available."""
-        import subprocess
-        
         try:
             # Check if FFmpeg has NVENC support
             result = subprocess.run(
@@ -143,35 +144,114 @@ class PoseAnalyzer:
     
     def _extract_landmarks(self, results) -> List[PoseLandmark]:
         """
-        Extract 3D landmarks from MediaPipe results.
+        Extract normalized 2D landmarks from MediaPipe results for video overlay.
         
         Args:
             results: MediaPipe pose detection results
             
         Returns:
-            List of 33 PoseLandmark objects (empty if no pose detected)
+            List of 33 PoseLandmark objects with normalized coordinates (0-1)
         """
-        # Fallback to regular landmarks if world landmarks unavailable
-        if results.pose_world_landmarks:
-            landmark_source = results.pose_world_landmarks.landmark
-        elif results.pose_landmarks:
-            landmark_source = results.pose_landmarks.landmark
-        else:
+        # Always use normalized landmarks for video overlay (not world landmarks)
+        if not results.pose_landmarks:
             return []
         
         landmarks = []
-        for landmark in landmark_source:
-            # Use available coordinate system (world if available, otherwise normalized)
+        for landmark in results.pose_landmarks.landmark:
+            # Use normalized 2D coordinates (0-1) for proper video overlay
             pose_landmark = PoseLandmark(
-                x=landmark.x,
-                y=landmark.y,  
-                z=getattr(landmark, 'z', 0.0),  # Z may not exist in regular landmarks
+                x=landmark.x,  # Normalized x coordinate (0-1)
+                y=landmark.y,  # Normalized y coordinate (0-1) 
+                z=getattr(landmark, 'z', 0.0),  # Normalized z depth
                 visibility=landmark.visibility
             )
             landmarks.append(pose_landmark)
         
         return landmarks
     
+    def _interpolate_pose(self, prev_landmarks: List[PoseLandmark], next_landmarks: List[PoseLandmark], ratio: float) -> List[PoseLandmark]:
+        """
+        Interpolate pose landmarks between two frames.
+        
+        Args:
+            prev_landmarks: Landmarks from previous frame with pose
+            next_landmarks: Landmarks from next frame with pose  
+            ratio: Interpolation ratio (0.0 = prev, 1.0 = next)
+            
+        Returns:
+            Interpolated landmarks
+        """
+        if not prev_landmarks or not next_landmarks or len(prev_landmarks) != len(next_landmarks):
+            return []
+        
+        interpolated = []
+        for i in range(len(prev_landmarks)):
+            prev_lm = prev_landmarks[i]
+            next_lm = next_landmarks[i]
+            
+            # Interpolate coordinates
+            x = prev_lm.x + ratio * (next_lm.x - prev_lm.x)
+            y = prev_lm.y + ratio * (next_lm.y - prev_lm.y)
+            z = prev_lm.z + ratio * (next_lm.z - prev_lm.z)
+            visibility = min(prev_lm.visibility, next_lm.visibility)  # Use minimum visibility
+            
+            interpolated.append(PoseLandmark(x=x, y=y, z=z, visibility=visibility))
+        
+        return interpolated
+
+    def _fill_skipped_frames(self, frame_analyses: List[FrameAnalysis]) -> List[FrameAnalysis]:
+        """
+        Fill in skipped frames with interpolated pose data.
+        
+        Args:
+            frame_analyses: List of frame analyses with placeholders
+            
+        Returns:
+            List with interpolated poses for skipped frames
+        """
+        if self.frame_skip <= 1:
+            return frame_analyses  # No skipping, return as-is
+        
+        # Find frames with actual pose data
+        pose_frames = []
+        for i, analysis in enumerate(frame_analyses):
+            if analysis.pose_detected and len(analysis.landmarks) == 33:
+                pose_frames.append(i)
+        
+        if len(pose_frames) < 2:
+            return frame_analyses  # Not enough pose data to interpolate
+        
+        # Interpolate missing frames between pose frames
+        updated_analyses = frame_analyses.copy()
+        
+        for i in range(len(pose_frames) - 1):
+            start_idx = pose_frames[i]
+            end_idx = pose_frames[i + 1]
+            
+            if end_idx - start_idx <= 1:
+                continue  # No frames to interpolate
+            
+            start_landmarks = frame_analyses[start_idx].landmarks
+            end_landmarks = frame_analyses[end_idx].landmarks
+            
+            # Interpolate frames between start_idx and end_idx
+            for frame_idx in range(start_idx + 1, end_idx):
+                ratio = (frame_idx - start_idx) / (end_idx - start_idx)
+                interpolated_landmarks = self._interpolate_pose(start_landmarks, end_landmarks, ratio)
+                
+                if interpolated_landmarks:
+                    # Update the placeholder with interpolated data
+                    updated_analyses[frame_idx] = FrameAnalysis(
+                        frame_number=frame_analyses[frame_idx].frame_number,
+                        timestamp_ms=frame_analyses[frame_idx].timestamp_ms,
+                        pose_detected=True,
+                        landmarks=interpolated_landmarks,
+                        confidence_score=0.8  # Lower confidence for interpolated poses
+                    )
+        
+        logger.info(f"🔄 Interpolated poses for {sum(1 for a in updated_analyses if a.confidence_score == 0.8)} skipped frames")
+        return updated_analyses
+
     def _calculate_confidence(self, landmarks: List[PoseLandmark]) -> float:
         """
         Calculate overall confidence score for pose detection.
@@ -197,58 +277,49 @@ class PoseAnalyzer:
         # Weighted average: 70% important landmarks, 30% all landmarks
         if important_visibilities:
             important_avg = sum(important_visibilities) / len(important_visibilities)
-            all_avg = sum(all_visibilities) / len(all_visibilities)
-            confidence = 0.7 * important_avg + 0.3 * all_avg
-        else:
-            confidence = sum(all_visibilities) / len(all_visibilities)
+            overall_avg = sum(all_visibilities) / len(all_visibilities)
+            return 0.7 * important_avg + 0.3 * overall_avg
         
-        return confidence
+        # Fallback to overall average
+        return sum(all_visibilities) / len(all_visibilities)
     
     def analyze_frame(self, frame: np.ndarray, frame_number: int, timestamp_ms: float) -> FrameAnalysis:
         """
-        Analyze a single video frame for pose detection.
+        Analyze a single frame for pose detection.
         
         Args:
-            frame: Video frame as numpy array (BGR format)
-            frame_number: Frame number in sequence
+            frame: Input frame as numpy array
+            frame_number: Frame sequence number
             timestamp_ms: Timestamp in milliseconds
             
         Returns:
             FrameAnalysis object with pose detection results
         """
         try:
-            # CRITICAL: Color conversion for MediaPipe  
+            # Convert BGR to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Debug: Log frame info every 30 frames
-            if frame_number % 30 == 0:
-                logger.info(f"Processing frame {frame_number}: {rgb_frame.shape}")
-            
-            # Process the frame
+            # Run pose detection
             results = self.pose.process(rgb_frame)
-            
-            # Debug: Check if pose was detected
-            pose_detected = results.pose_world_landmarks is not None
-            if frame_number % 30 == 0:
-                logger.info(f"Frame {frame_number}: Pose detected = {pose_detected}")
             
             # Extract landmarks
             landmarks = self._extract_landmarks(results)
+            pose_detected = len(landmarks) == 33  # MediaPipe returns 33 landmarks
             
-            # Calculate confidence
-            confidence = self._calculate_confidence(landmarks)
+            # Calculate confidence score
+            confidence_score = self._calculate_confidence(landmarks) if pose_detected else 0.0
             
-            # Update stats
+            # Update performance statistics
             self.processing_stats["frames_processed"] += 1
-            if landmarks:
+            if pose_detected:
                 self.processing_stats["poses_detected"] += 1
             
             return FrameAnalysis(
                 frame_number=frame_number,
                 timestamp_ms=timestamp_ms,
+                pose_detected=pose_detected,
                 landmarks=landmarks,
-                confidence_score=confidence,
-                pose_detected=len(landmarks) == 33
+                confidence_score=confidence_score
             )
             
         except Exception as e:
@@ -256,9 +327,9 @@ class PoseAnalyzer:
             return FrameAnalysis(
                 frame_number=frame_number,
                 timestamp_ms=timestamp_ms,
+                pose_detected=False,
                 landmarks=[],
-                confidence_score=0.0,
-                pose_detected=False
+                confidence_score=0.0
             )
     
     async def analyze_video(self, video_path: str, video_id: str) -> VideoAnalysis:
@@ -309,23 +380,41 @@ class PoseAnalyzer:
                 format=file_path.suffix.lstrip('.')
             )
             
-            # Process frames
+            # Process frames with optional frame skipping for performance
             frame_analyses = []
             frame_number = 0
+            analyzed_frames = 0
             
+            effective_fps = fps / self.frame_skip if self.frame_skip > 1 else fps
             logger.info(f"Processing video: {total_frames} frames at {fps:.1f} FPS")
+            if self.frame_skip > 1:
+                logger.info(f"⚡ Frame skipping enabled: analyzing every {self.frame_skip} frames (effective: {effective_fps:.1f} FPS)")
             
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
                 
-                # Calculate timestamp
-                timestamp_ms = (frame_number / fps) * 1000 if fps > 0 else 0
-                
-                # Analyze frame
-                analysis = self.analyze_frame(frame, frame_number, timestamp_ms)
-                frame_analyses.append(analysis)
+                # Skip frames for performance optimization
+                if frame_number % self.frame_skip == 0:
+                    # Calculate timestamp
+                    timestamp_ms = (frame_number / fps) * 1000 if fps > 0 else 0
+                    
+                    # Analyze frame
+                    analysis = self.analyze_frame(frame, frame_number, timestamp_ms)
+                    frame_analyses.append(analysis)
+                    analyzed_frames += 1
+                else:
+                    # Create a placeholder analysis for skipped frames (no pose detection)
+                    timestamp_ms = (frame_number / fps) * 1000 if fps > 0 else 0
+                    placeholder_analysis = FrameAnalysis(
+                        frame_number=frame_number,
+                        timestamp_ms=timestamp_ms,
+                        pose_detected=False,
+                        landmarks=[],
+                        confidence_score=0.0
+                    )
+                    frame_analyses.append(placeholder_analysis)
                 
                 frame_number += 1
                 
@@ -336,8 +425,12 @@ class PoseAnalyzer:
                         peak_gpu_memory = max(peak_gpu_memory, current_memory)
                         torch.cuda.empty_cache()  # Clear cache periodically
                         
-                    logger.info(f"Processed {frame_number}/{total_frames} frames "
-                              f"({100*frame_number/total_frames:.1f}%)")
+                    if self.frame_skip > 1:
+                        logger.info(f"Processed {frame_number}/{total_frames} frames "
+                                  f"({100*frame_number/total_frames:.1f}%) - Analyzed: {analyzed_frames}")
+                    else:
+                        logger.info(f"Processed {frame_number}/{total_frames} frames "
+                                  f"({100*frame_number/total_frames:.1f}%)")
             
             cap.release()
             
@@ -350,6 +443,14 @@ class PoseAnalyzer:
             processing_time = time.time() - start_time
             poses_detected = sum(1 for analysis in frame_analyses if analysis.pose_detected)
             
+            logger.info(f"✅ Analysis completed: {analyzed_frames}/{frame_number} frames analyzed in {processing_time:.2f}s")
+            if self.frame_skip > 1:
+                speedup = self.frame_skip
+                logger.info(f"⚡ Frame skipping speedup: ~{speedup:.1f}x faster ({analyzed_frames} vs {frame_number} frames)")
+                
+                # Fill in skipped frames with interpolated poses for smooth video overlay
+                frame_analyses = self._fill_skipped_frames(frame_analyses)
+            
             # Create analysis result
             video_analysis = VideoAnalysis(
                 video_id=video_id,
@@ -360,10 +461,6 @@ class PoseAnalyzer:
                 gpu_memory_used_mb=peak_gpu_memory,
                 poses_detected_count=poses_detected
             )
-            
-            logger.info(f"Video analysis completed: {poses_detected}/{total_frames} poses detected "
-                       f"({video_analysis.pose_detection_rate:.1%} success rate) "
-                       f"in {processing_time:.1f}s")
             
             return video_analysis
             
@@ -392,13 +489,13 @@ class PoseAnalyzer:
                 poses_detected_count=0,
                 error_message=str(e)
             )
-    
+
     def create_pose_overlay_video(self, 
                                  video_path: str, 
                                  output_path: str, 
                                  analysis: VideoAnalysis) -> bool:
         """
-        Create a video with pose landmarks overlay.
+        Create video with pose overlay using direct FFmpeg piping (no AVI intermediate).
         
         Args:
             video_path: Path to original video
@@ -409,7 +506,7 @@ class PoseAnalyzer:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"🎬 Starting pose overlay video creation: {output_path}")
+            logger.info(f"🎬 Starting direct pose overlay video creation: {output_path}")
             
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -422,171 +519,174 @@ class PoseAnalyzer:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
             logger.info(f"📊 Video properties: {width}x{height} @ {fps}fps")
+            logger.info("⚡ Using direct FFmpeg piping (no intermediate AVI)")
             
-            # Create video writer - skip OpenCV VideoWriter and use FFmpeg directly
-            temp_output_path = str(output_path).replace('.mp4', '_temp.avi')
-            logger.info(f"📁 Creating temp AVI: {temp_output_path}")
+            # Build FFmpeg command for direct piping
+            ffmpeg_cmd = [
+                'ffmpeg', '-y',  # Overwrite output
+                '-f', 'rawvideo',  # Input format
+                '-vcodec', 'rawvideo',
+                '-s', f'{width}x{height}',  # Size
+                '-pix_fmt', 'bgr24',  # OpenCV uses BGR
+                '-r', str(fps),  # Frame rate
+                '-i', '-',  # Read from stdin
+            ]
             
-            fourcc = cv2.VideoWriter_fourcc(*'MJPG')  # Use MJPG for reliable OpenCV output
-            out = cv2.VideoWriter(temp_output_path, fourcc, fps, (width, height))
+            # Add encoding parameters
+            if self.use_gpu_encoding:
+                logger.info("🚀 Using NVIDIA NVENC GPU encoding")
+                ffmpeg_cmd.extend([
+                    '-c:v', 'h264_nvenc',
+                    '-preset', 'fast',
+                    '-profile:v', 'baseline',
+                    '-level', '3.0',
+                    '-pix_fmt', 'yuv420p',
+                    '-cq', '28',
+                    '-b:v', '2M',
+                    '-maxrate', '4M',
+                    '-bufsize', '8M',
+                    '-rc:v', 'vbr',
+                    '-movflags', '+faststart',
+                    '-avoid_negative_ts', 'make_zero'
+                ])
+            else:
+                logger.info("🖥️ Using CPU libx264 encoding")
+                ffmpeg_cmd.extend([
+                    '-c:v', 'libx264',
+                    '-profile:v', 'baseline',
+                    '-level', '3.0',
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', '28',
+                    '-preset', 'ultrafast',
+                    '-movflags', '+faststart',
+                    '-avoid_negative_ts', 'make_zero'
+                ])
             
-            if not out.isOpened():
-                logger.error(f"❌ Cannot create output video writer")
-                return False
+            ffmpeg_cmd.append(str(output_path))
+            
+            # Start FFmpeg process
+            logger.info(f"🔧 Starting FFmpeg: {' '.join(ffmpeg_cmd[:8])}... {output_path}")
+            process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=10**8  # Large buffer for video data
+            )
             
             frame_number = 0
+            processed_frames = 0
             
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                # Get corresponding analysis if available
-                if frame_number < len(analysis.frame_analyses):
-                    frame_analysis = analysis.frame_analyses[frame_number]
-                    
-                    if frame_analysis.pose_detected and len(frame_analysis.landmarks) == 33:
-                        # Convert landmarks back to image coordinates for drawing
-                        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        results = self.pose.process(rgb_frame)
-                        
-                        if results.pose_landmarks:
-                            # Draw pose landmarks
-                            self.mp_drawing.draw_landmarks(
-                                frame,
-                                results.pose_landmarks,
-                                self.mp_pose.POSE_CONNECTIONS,
-                                self.mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=2),
-                                self.mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)
-                            )
-                            
-                        # Add confidence score text
-                        cv2.putText(
-                            frame,
-                            f"Confidence: {frame_analysis.confidence_score:.2f}",
-                            (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            1,
-                            (255, 255, 255),
-                            2
-                        )
-                
-                out.write(frame)
-                frame_number += 1
-            
-            cap.release()
-            out.release()
-            
-            logger.info(f"✅ AVI creation complete: {temp_output_path}")
-            logger.info(f"📊 AVI file size: {Path(temp_output_path).stat().st_size} bytes")
-            
-            # Convert MJPG AVI to browser-compatible H.264 MP4 using FFmpeg
-            import subprocess
-            import os
             try:
-                logger.info(f"🎬 Converting {temp_output_path} to {output_path}")
-                
-                # Build FFmpeg command with GPU or CPU encoding
-                ffmpeg_cmd = ['ffmpeg', '-i', temp_output_path]
-                
-                if self.use_gpu_encoding:
-                    logger.info("🚀 Using NVIDIA NVENC GPU encoding")
-                    ffmpeg_cmd.extend([
-                        '-c:v', 'h264_nvenc',        # NVIDIA GPU encoder
-                        '-preset', 'fast',           # NVENC preset (fast, medium, slow)
-                        '-profile:v', 'baseline',    # Baseline profile for browser compatibility
-                        '-level', '3.0',            # Compatible level
-                        '-pix_fmt', 'yuv420p',      # Standard pixel format
-                        '-cq', '28',                # Constant quality (NVENC equivalent of CRF)
-                        '-b:v', '2M',               # Bitrate limit for stability
-                        '-maxrate', '4M',           # Maximum bitrate
-                        '-bufsize', '8M',           # Buffer size
-                        '-rc:v', 'vbr',            # Variable bitrate mode
-                        '-movflags', '+faststart',  # Optimize for web streaming
-                        '-avoid_negative_ts', 'make_zero'  # Fix timestamp issues
-                    ])
-                else:
-                    logger.info("🖥️ Using CPU libx264 encoding")
-                    ffmpeg_cmd.extend([
-                        '-c:v', 'libx264',
-                        '-profile:v', 'baseline',     # Baseline profile for maximum compatibility
-                        '-level', '3.0',             # Lower level for broader compatibility
-                        '-pix_fmt', 'yuv420p',
-                        '-crf', '28',                # Higher CRF (lower quality) for stability
-                        '-preset', 'ultrafast',      # Fastest encoding for simpler output
-                        '-movflags', '+faststart',   # Optimize for web streaming
-                        '-avoid_negative_ts', 'make_zero'  # Fix timestamp issues
-                    ])
-                
-                ffmpeg_cmd.extend(['-y', str(output_path)])
-                
-                # Execute FFmpeg command
-                result = subprocess.run(
-                    ffmpeg_cmd, 
-                    capture_output=True, 
-                    text=True, 
-                    timeout=300  # 5 minute timeout
-                )
-                
-                # Check FFmpeg result explicitly
-                if result.returncode != 0:
-                    logger.error(f"❌ FFmpeg failed with return code {result.returncode}")
-                    logger.error(f"FFmpeg stdout: {result.stdout}")
-                    logger.error(f"FFmpeg stderr: {result.stderr}")
-                    return False
-                
-                logger.info(f"✅ FFmpeg conversion successful")
-                
-                # Verify output file was created
-                if not Path(output_path).exists():
-                    logger.error(f"❌ Output file not created: {output_path}")
-                    return False
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
                     
-                output_size = Path(output_path).stat().st_size
-                logger.info(f"📊 Output file size: {output_size} bytes")
-                
-                # Clean up temporary AVI file
-                os.remove(temp_output_path)
-                logger.info(f"Pose overlay video converted to browser-compatible H.264: {output_path}")
-                
-                # Create a copy in pose_analysis_videos folder for easy access
-                try:
-                    pose_videos_dir = Path("pose_analysis_videos")
-                    pose_videos_dir.mkdir(exist_ok=True)
+                    # Get corresponding analysis if available
+                    if frame_number < len(analysis.frame_analyses):
+                        frame_analysis = analysis.frame_analyses[frame_number]
+                        
+                        if frame_analysis.pose_detected and len(frame_analysis.landmarks) == 33:
+                            # Draw pose landmarks directly using OpenCV
+                            landmarks = frame_analysis.landmarks
+                            
+                            # Convert normalized coordinates to pixel coordinates with bounds checking
+                            for i, landmark in enumerate(landmarks):
+                                if landmark.visibility > 0.5:  # Only draw visible landmarks
+                                    # Ensure coordinates are within valid bounds [0, 1]
+                                    norm_x = max(0.0, min(1.0, landmark.x))
+                                    norm_y = max(0.0, min(1.0, landmark.y))
+                                    
+                                    # Convert to pixel coordinates
+                                    x = int(norm_x * width)
+                                    y = int(norm_y * height)
+                                    
+                                    # Ensure pixel coordinates are within frame bounds
+                                    x = max(0, min(width - 1, x))
+                                    y = max(0, min(height - 1, y))
+                                    
+                                    # Draw landmark point
+                                    cv2.circle(frame, (x, y), 4, (66, 230, 245), -1)  # BGR format
+                                    cv2.circle(frame, (x, y), 6, (66, 117, 245), 2)   # BGR format
+                            
+                            # Draw pose connections (simplified version)
+                            connections = [
+                                (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),  # Arms
+                                (11, 23), (12, 24), (23, 24),  # Torso
+                                (23, 25), (25, 27), (24, 26), (26, 28),  # Legs
+                                (27, 29), (29, 31), (28, 30), (30, 32)  # Feet
+                            ]
+                            
+                            for connection in connections:
+                                if (connection[0] < len(landmarks) and connection[1] < len(landmarks) and
+                                    landmarks[connection[0]].visibility > 0.5 and landmarks[connection[1]].visibility > 0.5):
+                                    
+                                    # Convert start point with bounds checking
+                                    start_norm_x = max(0.0, min(1.0, landmarks[connection[0]].x))
+                                    start_norm_y = max(0.0, min(1.0, landmarks[connection[0]].y))
+                                    start_x = max(0, min(width - 1, int(start_norm_x * width)))
+                                    start_y = max(0, min(height - 1, int(start_norm_y * height)))
+                                    
+                                    # Convert end point with bounds checking  
+                                    end_norm_x = max(0.0, min(1.0, landmarks[connection[1]].x))
+                                    end_norm_y = max(0.0, min(1.0, landmarks[connection[1]].y))
+                                    end_x = max(0, min(width - 1, int(end_norm_x * width)))
+                                    end_y = max(0, min(height - 1, int(end_norm_y * height)))
+                                    
+                                    cv2.line(frame, (start_x, start_y), (end_x, end_y), (245, 117, 66), 2)
+                            
+                            # Add confidence score text
+                            cv2.putText(
+                                frame,
+                                f"Confidence: {frame_analysis.confidence_score:.2f}",
+                                (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7,
+                                (255, 255, 255),
+                                2
+                            )
                     
-                    # Create a descriptive filename
-                    video_filename = Path(output_path).stem.replace("_processed", "_pose_analysis_h264")
-                    copy_path = pose_videos_dir / f"{video_filename}.mp4"
+                    # Write frame directly to FFmpeg stdin
+                    try:
+                        process.stdin.write(frame.tobytes())
+                        processed_frames += 1
+                    except BrokenPipeError:
+                        logger.error("FFmpeg pipe broken, stopping frame processing")
+                        break
                     
-                    # Copy the H.264 video to pose_analysis_videos folder
-                    import shutil
-                    shutil.copy2(str(output_path), str(copy_path))
-                    logger.info(f"Created copy in pose_analysis_videos: {copy_path}")
+                    frame_number += 1
                     
-                except Exception as copy_error:
-                    logger.warning(f"Failed to copy to pose_analysis_videos: {copy_error}")
-                    # Don't fail the whole process if copy fails
-                
-            except subprocess.CalledProcessError as e:
-                logger.error(f"💥 H.264 conversion failed: {e}")
-                logger.error(f"FFmpeg stdout: {e.stdout}")
-                logger.error(f"FFmpeg stderr: {e.stderr}")
-                # Clean up temp files if they exist
-                try:
-                    os.remove(temp_output_path)
-                except:
-                    pass
-                return False
-            except Exception as e:
-                logger.error(f"H.264 conversion error: {e}")
-                return False
+                    if frame_number % 100 == 0:
+                        logger.info(f"Piped {frame_number} frames to FFmpeg...")
             
-            return True
+            finally:
+                # Close stdin to signal end of input
+                try:
+                    if process.stdin and not process.stdin.closed:
+                        process.stdin.close()
+                except Exception as e:
+                    logger.warning(f"⚠️ Error closing FFmpeg stdin: {e}")
+                
+                cap.release()
             
+            # Wait for FFmpeg to finish
+            stdout, stderr = process.communicate()
+            
+            if process.returncode == 0:
+                logger.info(f"✅ Direct FFmpeg processing completed successfully")
+                logger.info(f"📊 Processed {processed_frames} frames via direct piping")
+                return True
+            else:
+                logger.error(f"❌ FFmpeg failed with return code {process.returncode}")
+                if stderr:
+                    logger.error(f"FFmpeg stderr: {stderr.decode()}")
+                return False
+                
         except Exception as e:
-            logger.error(f"Error creating pose overlay video: {e}")
+            logger.error(f"❌ Error in direct pose overlay creation: {e}")
             return False
-    
+
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get current performance statistics."""
         return self.processing_stats.copy()
@@ -599,8 +699,3 @@ class PoseAnalyzer:
             "total_processing_time": 0.0,
             "gpu_memory_peak": 0.0
         }
-    
-    def __del__(self):
-        """Clean up MediaPipe resources."""
-        if hasattr(self, 'pose'):
-            self.pose.close()

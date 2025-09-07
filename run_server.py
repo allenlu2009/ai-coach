@@ -92,6 +92,10 @@ def main():
 		parser = argparse.ArgumentParser(description='AI Coach - Pose Analysis System')
 		parser.add_argument('--gpu-encoding', action='store_true', 
 						   help='Enable GPU-accelerated FFmpeg encoding (requires NVIDIA GPU with NVENC)')
+		parser.add_argument('--create-video', action='store_true',
+						   help='Create video overlay files (default: JSON-only for 3x faster results)')
+		parser.add_argument('--frame-skip', type=int, default=3,
+						   help='Analyze every Nth frame for speedup (default: 3 for 3x faster analysis)')
 		parser.add_argument('--host', default='127.0.0.1', 
 						   help='Host to bind the server to (default: 127.0.0.1)')
 		parser.add_argument('--port', type=int, default=8000,
@@ -125,10 +129,22 @@ def main():
 			print("🎬 GPU-accelerated FFmpeg encoding enabled (NVIDIA NVENC)")
 		else:
 			print("🖥️ CPU-based FFmpeg encoding (use --gpu-encoding for GPU acceleration)")
+		
+		if args.create_video:
+			print("🎥 Video overlay creation enabled (slower but creates MP4 files)")
+		else:
+			print("⚡ JSON-only mode enabled (3x faster, no video overlay files)")
+		
+		print(f"🎯 Frame skipping: analyzing every {args.frame_skip} frames (effective speedup: ~{args.frame_skip}x)")
 
-		# Import the app creation function and pass GPU encoding parameter
+		# Import the app creation function and pass all optimization parameters
 		from ai_coach.api import create_app
-		app = create_app(uploads_dir=str(uploads_dir), use_gpu_encoding=args.gpu_encoding)
+		app = create_app(
+			uploads_dir=str(uploads_dir), 
+			use_gpu_encoding=args.gpu_encoding,
+			create_video_overlay=args.create_video,
+			frame_skip=args.frame_skip
+		)
 
 		# Run with the configured app instance
 		uvicorn.run(

@@ -48,7 +48,9 @@ class VideoProcessor:
     def __init__(self, 
                  uploads_dir: str = "uploads",
                  pose_analyzer: Optional[PoseAnalyzer] = None,
-                 use_gpu_encoding: bool = False):
+                 use_gpu_encoding: bool = False,
+                 create_video_overlay: bool = False,
+                 frame_skip: int = 3):
         """
         Initialize the video processor.
         
@@ -56,6 +58,8 @@ class VideoProcessor:
             uploads_dir: Directory for temporary video storage
             pose_analyzer: PoseAnalyzer instance (created if None)
             use_gpu_encoding: Whether to use GPU acceleration for FFmpeg video encoding
+            create_video_overlay: Whether to create video overlay (default: False for JSON-only)
+            frame_skip: Analyze every Nth frame for performance (default: 3)
         """
         self.uploads_dir = Path(uploads_dir)
         self.temp_dir = self.uploads_dir / "temp"
@@ -66,13 +70,20 @@ class VideoProcessor:
         for directory in [self.temp_dir, self.processed_dir, self.results_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         
-        # Initialize pose analyzer
-        self.pose_analyzer = pose_analyzer or PoseAnalyzer(use_gpu_encoding=use_gpu_encoding)
+        # Store configuration
+        self.create_video_overlay = create_video_overlay
+        
+        # Initialize pose analyzer with frame skipping
+        self.pose_analyzer = pose_analyzer or PoseAnalyzer(
+            use_gpu_encoding=use_gpu_encoding, 
+            frame_skip=frame_skip
+        )
         
         # Active processing jobs (video_id -> progress info)
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
         
-        logger.info(f"VideoProcessor initialized - uploads dir: {self.uploads_dir}")
+        overlay_mode = "enabled" if create_video_overlay else "disabled (JSON-only)"
+        logger.info(f"VideoProcessor initialized - uploads dir: {self.uploads_dir}, overlay: {overlay_mode}")
     
     async def validate_video_file(self, file: UploadFile) -> Dict[str, Any]:
         """
@@ -217,10 +228,12 @@ class VideoProcessor:
             # Save analysis results
             await self._save_analysis_results(analysis)
             
-            # Create processed video with pose overlay BEFORE marking as complete
-            if analysis.status == ProcessingStatus.COMPLETED:
+            # Conditionally create processed video with pose overlay
+            if analysis.status == ProcessingStatus.COMPLETED and self.create_video_overlay:
                 logger.info(f"🎬 Analysis completed, creating processed video for {video_id}")
                 await self._create_processed_video(video_path, analysis)
+            elif analysis.status == ProcessingStatus.COMPLETED:
+                logger.info(f"✅ Analysis completed, skipping video overlay creation (JSON-only mode)")
             else:
                 logger.warning(f"⚠️ Analysis not completed, skipping video creation. Status: {analysis.status}")
             
