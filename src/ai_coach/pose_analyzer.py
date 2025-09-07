@@ -38,16 +38,18 @@ class PoseAnalyzer:
     comprehensive analysis results optimized for RTX 3060 GPU usage.
     """
     
-    def __init__(self, use_gpu: bool = True, model_complexity: int = 2):
+    def __init__(self, use_gpu: bool = True, model_complexity: int = 2, use_gpu_encoding: bool = False):
         """
         Initialize the pose analyzer.
         
         Args:
-            use_gpu: Whether to use GPU acceleration if available
+            use_gpu: Whether to use GPU acceleration for MediaPipe pose detection
             model_complexity: MediaPipe model complexity (0, 1, or 2)
                              2 = highest accuracy, best for coaching
+            use_gpu_encoding: Whether to use GPU acceleration for FFmpeg video encoding
         """
         self.use_gpu = use_gpu and self._check_gpu_availability()
+        self.use_gpu_encoding = use_gpu_encoding and self._check_nvenc_availability()
         self.model_complexity = model_complexity
         
         # Initialize MediaPipe components
@@ -94,6 +96,50 @@ class PoseAnalyzer:
             logger.warning("Low GPU memory, consider using CPU mode")
         
         return True
+    
+    def _check_nvenc_availability(self) -> bool:
+        """Check if NVIDIA NVENC GPU encoding is available."""
+        import subprocess
+        
+        try:
+            # Check if FFmpeg has NVENC support
+            result = subprocess.run(
+                ['ffmpeg', '-encoders'], 
+                capture_output=True, text=True, timeout=10
+            )
+            
+            if result.returncode != 0:
+                logger.warning("FFmpeg not available, cannot use GPU encoding")
+                return False
+            
+            # Check for NVENC encoders
+            has_nvenc = 'h264_nvenc' in result.stdout
+            
+            if not has_nvenc:
+                logger.warning("NVENC encoder not found in FFmpeg, using CPU encoding")
+                return False
+            
+            # Test NVENC encoder by encoding a small test
+            try:
+                test_result = subprocess.run([
+                    'ffmpeg', '-f', 'lavfi', '-i', 'testsrc=duration=0.1:size=320x240:rate=1',
+                    '-c:v', 'h264_nvenc', '-f', 'null', '-'
+                ], capture_output=True, text=True, timeout=15)
+                
+                if test_result.returncode == 0:
+                    logger.info("✅ NVIDIA NVENC GPU encoding available and functional")
+                    return True
+                else:
+                    logger.warning("NVENC test failed, falling back to CPU encoding")
+                    return False
+                    
+            except subprocess.TimeoutExpired:
+                logger.warning("NVENC test timed out, falling back to CPU encoding")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error checking NVENC availability: {e}")
+            return False
     
     def _extract_landmarks(self, results) -> List[PoseLandmark]:
         """
@@ -440,19 +486,47 @@ class PoseAnalyzer:
             try:
                 logger.info(f"🎬 Converting {temp_output_path} to {output_path}")
                 
-                # Use FFmpeg to create browser-compatible video with ultra-conservative settings
-                result = subprocess.run([
-                    'ffmpeg', '-i', temp_output_path,
-                    '-c:v', 'libx264',
-                    '-profile:v', 'baseline',     # Baseline profile for maximum compatibility
-                    '-level', '3.0',             # Lower level for broader compatibility
-                    '-pix_fmt', 'yuv420p',
-                    '-crf', '28',                # Higher CRF (lower quality) for stability
-                    '-preset', 'ultrafast',      # Fastest encoding for simpler output
-                    '-movflags', '+faststart',   # Optimize for web streaming
-                    '-avoid_negative_ts', 'make_zero',  # Fix timestamp issues
-                    '-y', str(output_path)
-                ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
+                # Build FFmpeg command with GPU or CPU encoding
+                ffmpeg_cmd = ['ffmpeg', '-i', temp_output_path]
+                
+                if self.use_gpu_encoding:
+                    logger.info("🚀 Using NVIDIA NVENC GPU encoding")
+                    ffmpeg_cmd.extend([
+                        '-c:v', 'h264_nvenc',        # NVIDIA GPU encoder
+                        '-preset', 'fast',           # NVENC preset (fast, medium, slow)
+                        '-profile:v', 'baseline',    # Baseline profile for browser compatibility
+                        '-level', '3.0',            # Compatible level
+                        '-pix_fmt', 'yuv420p',      # Standard pixel format
+                        '-cq', '28',                # Constant quality (NVENC equivalent of CRF)
+                        '-b:v', '2M',               # Bitrate limit for stability
+                        '-maxrate', '4M',           # Maximum bitrate
+                        '-bufsize', '8M',           # Buffer size
+                        '-rc:v', 'vbr',            # Variable bitrate mode
+                        '-movflags', '+faststart',  # Optimize for web streaming
+                        '-avoid_negative_ts', 'make_zero'  # Fix timestamp issues
+                    ])
+                else:
+                    logger.info("🖥️ Using CPU libx264 encoding")
+                    ffmpeg_cmd.extend([
+                        '-c:v', 'libx264',
+                        '-profile:v', 'baseline',     # Baseline profile for maximum compatibility
+                        '-level', '3.0',             # Lower level for broader compatibility
+                        '-pix_fmt', 'yuv420p',
+                        '-crf', '28',                # Higher CRF (lower quality) for stability
+                        '-preset', 'ultrafast',      # Fastest encoding for simpler output
+                        '-movflags', '+faststart',   # Optimize for web streaming
+                        '-avoid_negative_ts', 'make_zero'  # Fix timestamp issues
+                    ])
+                
+                ffmpeg_cmd.extend(['-y', str(output_path)])
+                
+                # Execute FFmpeg command
+                result = subprocess.run(
+                    ffmpeg_cmd, 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=300  # 5 minute timeout
+                )
                 
                 # Check FFmpeg result explicitly
                 if result.returncode != 0:

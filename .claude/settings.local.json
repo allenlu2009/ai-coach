@@ -32,7 +32,17 @@
       "mcp__playwright__browser_snapshot",
       "mcp__playwright__browser_evaluate",
       "Bash(ffplay:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(uv add:*)",
+      "Bash(pip install:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(uv pip install:*)",
+      "Bash(conda:*)",
+      "Bash(pip --version)",
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)"
     ],
     "deny": []
   }

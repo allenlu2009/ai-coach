@@ -5,6 +5,7 @@ Simple server runner that avoids MediaPipe initialization issues.
 
 import os
 import sys
+import argparse
 from pathlib import Path
 import threading
 import time
@@ -87,6 +88,17 @@ def _watch_uploads_dir(uploads_dir: Path, poll_interval: float = 2.0):
 def main():
 	"""Run the AI Coach server with stability fixes."""
 	try:
+		# Parse command line arguments
+		parser = argparse.ArgumentParser(description='AI Coach - Pose Analysis System')
+		parser.add_argument('--gpu-encoding', action='store_true', 
+						   help='Enable GPU-accelerated FFmpeg encoding (requires NVIDIA GPU with NVENC)')
+		parser.add_argument('--host', default='127.0.0.1', 
+						   help='Host to bind the server to (default: 127.0.0.1)')
+		parser.add_argument('--port', type=int, default=8000,
+						   help='Port to bind the server to (default: 8000)')
+		
+		args = parser.parse_args()
+		
 		import uvicorn
 		from dotenv import load_dotenv
 
@@ -107,14 +119,22 @@ def main():
 		watcher.start()
 
 		print("🏃‍♀️ Starting AI Coach Server...")
-		print("📍 Server will be available at: http://localhost:8000")
+		print(f"📍 Server will be available at: http://{args.host}:{args.port}")
 		print("🚀 GPU acceleration enabled for RTX 3060")
+		if args.gpu_encoding:
+			print("🎬 GPU-accelerated FFmpeg encoding enabled (NVIDIA NVENC)")
+		else:
+			print("🖥️ CPU-based FFmpeg encoding (use --gpu-encoding for GPU acceleration)")
 
-		# Run with string import to delay MediaPipe initialization
+		# Import the app creation function and pass GPU encoding parameter
+		from ai_coach.api import create_app
+		app = create_app(uploads_dir=str(uploads_dir), use_gpu_encoding=args.gpu_encoding)
+
+		# Run with the configured app instance
 		uvicorn.run(
-			"ai_coach.api:app",
-			host="127.0.0.1",
-			port=8000,
+			app,
+			host=args.host,
+			port=args.port,
 			reload=False,  # Disable reload to avoid MediaPipe re-init issues
 			log_level="info"
 		)

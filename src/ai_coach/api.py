@@ -118,12 +118,13 @@ class WebSocketManager:
                     pass  # Will be cleaned up on next send attempt
 
 
-def create_app(uploads_dir: str = "uploads") -> FastAPI:
+def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False) -> FastAPI:
     """
     Create and configure FastAPI application.
     
     Args:
         uploads_dir: Directory for video uploads and processing
+        use_gpu_encoding: Whether to use GPU acceleration for FFmpeg video encoding
         
     Returns:
         Configured FastAPI app instance
@@ -147,7 +148,7 @@ def create_app(uploads_dir: str = "uploads") -> FastAPI:
     
     # Initialize core components
     pose_analyzer = PoseAnalyzer(use_gpu=True)
-    video_processor = VideoProcessor(uploads_dir=uploads_dir, pose_analyzer=pose_analyzer)
+    video_processor = VideoProcessor(uploads_dir=uploads_dir, pose_analyzer=pose_analyzer, use_gpu_encoding=use_gpu_encoding)
     coach_agent = CoachAgent()
     websocket_manager = WebSocketManager()
     

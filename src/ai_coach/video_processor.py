@@ -47,13 +47,15 @@ class VideoProcessor:
     
     def __init__(self, 
                  uploads_dir: str = "uploads",
-                 pose_analyzer: Optional[PoseAnalyzer] = None):
+                 pose_analyzer: Optional[PoseAnalyzer] = None,
+                 use_gpu_encoding: bool = False):
         """
         Initialize the video processor.
         
         Args:
             uploads_dir: Directory for temporary video storage
             pose_analyzer: PoseAnalyzer instance (created if None)
+            use_gpu_encoding: Whether to use GPU acceleration for FFmpeg video encoding
         """
         self.uploads_dir = Path(uploads_dir)
         self.temp_dir = self.uploads_dir / "temp"
@@ -65,7 +67,7 @@ class VideoProcessor:
             directory.mkdir(parents=True, exist_ok=True)
         
         # Initialize pose analyzer
-        self.pose_analyzer = pose_analyzer or PoseAnalyzer()
+        self.pose_analyzer = pose_analyzer or PoseAnalyzer(use_gpu_encoding=use_gpu_encoding)
         
         # Active processing jobs (video_id -> progress info)
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
