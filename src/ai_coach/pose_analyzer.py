@@ -566,6 +566,8 @@ class PoseAnalyzer:
             
             # Start FFmpeg process
             logger.info(f"🔧 Starting FFmpeg: {' '.join(ffmpeg_cmd[:8])}... {output_path}")
+            logger.info(f"📋 Full FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            
             process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdin=subprocess.PIPE,
@@ -574,6 +576,15 @@ class PoseAnalyzer:
                 bufsize=10**8  # Large buffer for video data
             )
             
+            # Check if process started successfully
+            initial_poll = process.poll()
+            if initial_poll is not None:
+                logger.error(f"❌ FFmpeg process failed to start, return code: {initial_poll}")
+                stdout, stderr = process.communicate()
+                if stderr:
+                    logger.error(f"FFmpeg startup stderr: {stderr.decode('utf-8', errors='replace')}")
+                return False
+            
             frame_number = 0
             processed_frames = 0
             
@@ -581,6 +592,11 @@ class PoseAnalyzer:
                 while cap.isOpened():
                     ret, frame = cap.read()
                     if not ret:
+                        break
+                    
+                    # Check if FFmpeg process is still alive
+                    if process.poll() is not None:
+                        logger.error(f"FFmpeg process terminated unexpectedly with return code {process.returncode}")
                         break
                     
                     # Get corresponding analysis if available
@@ -649,10 +665,17 @@ class PoseAnalyzer:
                     
                     # Write frame directly to FFmpeg stdin
                     try:
-                        process.stdin.write(frame.tobytes())
-                        processed_frames += 1
+                        if process.stdin and not process.stdin.closed:
+                            process.stdin.write(frame.tobytes())
+                            processed_frames += 1
+                        else:
+                            logger.error("FFmpeg stdin is closed or None, stopping")
+                            break
                     except BrokenPipeError:
                         logger.error("FFmpeg pipe broken, stopping frame processing")
+                        break
+                    except OSError as e:
+                        logger.error(f"FFmpeg write error: {e}, stopping frame processing")
                         break
                     
                     frame_number += 1
@@ -663,10 +686,12 @@ class PoseAnalyzer:
             finally:
                 # Close stdin to signal end of input
                 try:
-                    if process.stdin and not process.stdin.closed:
+                    if hasattr(process, 'stdin') and process.stdin and not process.stdin.closed:
                         process.stdin.close()
+                except (OSError, BrokenPipeError) as e:
+                    logger.warning(f"⚠️ Expected error closing FFmpeg stdin: {e}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Error closing FFmpeg stdin: {e}")
+                    logger.error(f"❌ Unexpected error closing FFmpeg stdin: {e}")
                 
                 cap.release()
             
@@ -679,8 +704,14 @@ class PoseAnalyzer:
                 return True
             else:
                 logger.error(f"❌ FFmpeg failed with return code {process.returncode}")
+                logger.error(f"📊 Processed {processed_frames} frames before failure")
                 if stderr:
-                    logger.error(f"FFmpeg stderr: {stderr.decode()}")
+                    # Log full stderr for debugging
+                    stderr_text = stderr.decode('utf-8', errors='replace')
+                    logger.error(f"FFmpeg stderr (full): {stderr_text}")
+                if stdout:
+                    stdout_text = stdout.decode('utf-8', errors='replace')
+                    logger.info(f"FFmpeg stdout: {stdout_text}")
                 return False
                 
         except Exception as e:
