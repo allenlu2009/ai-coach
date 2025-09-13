@@ -661,10 +661,16 @@ class RTMPoseAnalyzer:
                     '-pix_fmt', 'yuv420p',
                 ])
             else:
-                logger.info("🖥️ Using OpenH264 encoder for conda FFmpeg compatibility")
+                logger.info("🖥️ Using libx264 encoder with browser optimization")
                 ffmpeg_cmd.extend([
-                    '-c:v', 'libopenh264',
-                    '-pix_fmt', 'yuv420p'
+                    '-c:v', 'libx264',
+                    '-profile:v', 'baseline',
+                    '-level', '3.0',
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', '28',
+                    '-preset', 'ultrafast',
+                    '-movflags', '+faststart',
+                    '-avoid_negative_ts', 'make_zero'
                 ])
             
             ffmpeg_cmd.append(output_path)
