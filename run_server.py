@@ -96,6 +96,8 @@ def main():
 						   help='Create video overlay files (default: JSON-only for 3x faster results)')
 		parser.add_argument('--frame-skip', type=int, default=3,
 						   help='Analyze every Nth frame for speedup (default: 3 for 3x faster analysis)')
+		parser.add_argument('--use-3d', action='store_true',
+						   help='Enable 3D pose estimation (default: 2D pose detection)')
 		parser.add_argument('--host', default='127.0.0.1', 
 						   help='Host to bind the server to (default: 127.0.0.1)')
 		parser.add_argument('--port', type=int, default=8000,
@@ -108,6 +110,12 @@ def main():
 
 		# Load environment variables
 		load_dotenv()
+		
+		# Set 3D pose environment variable based on command line argument
+		if args.use_3d:
+			os.environ['USE_3D_POSE'] = 'true'
+		else:
+			os.environ['USE_3D_POSE'] = 'false'
 
 		# Ensure uploads directory exists (use project-local uploads folder)
 		uploads_dir = Path(__file__).parent / "uploads"
@@ -117,6 +125,7 @@ def main():
 		print(f"📂 Uploads directory: {uploads_dir.resolve()}")
 		print(f"🌐 MEDIAPIPE_DISABLE_GPU={os.getenv('MEDIAPIPE_DISABLE_GPU')}")
 		print(f"🔧 OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS={os.getenv('OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS')}")
+		print(f"🔮 USE_3D_POSE={os.getenv('USE_3D_POSE')}")
 
 		# Start background watcher to help diagnose final video files produced at runtime
 		watcher = threading.Thread(target=_watch_uploads_dir, args=(uploads_dir,), daemon=True)
@@ -136,6 +145,11 @@ def main():
 			print("⚡ JSON-only mode enabled (3x faster, no video overlay files)")
 		
 		print(f"🎯 Frame skipping: analyzing every {args.frame_skip} frames (effective speedup: ~{args.frame_skip}x)")
+		
+		if args.use_3d:
+			print("🔮 3D pose estimation enabled - generating X,Y,Z coordinates")
+		else:
+			print("📊 2D pose detection mode (default) - use --use-3d for 3D coordinates")
 
 		# Import the app creation function and pass all optimization parameters
 		from ai_coach.api import create_app

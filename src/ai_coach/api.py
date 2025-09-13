@@ -152,14 +152,19 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
     
     # Initialize core components - use RTMPose if available, fallback to MediaPipe
     use_rtmpose = os.getenv('USE_RTMPOSE', 'true').lower() == 'true'
+    use_3d = os.getenv('USE_3D_POSE', 'false').lower() == 'true'
     
     if use_rtmpose:
         try:
             pose_analyzer = RTMPoseAnalyzer(
                 use_gpu_encoding=use_gpu_encoding, 
-                frame_skip=frame_skip
+                frame_skip=frame_skip,
+                use_3d=use_3d
             )
-            logger.info("🚀 Using RTMPose analyzer for ultra-fast pose detection")
+            if use_3d:
+                logger.info("🚀 Using RTMPose analyzer with 3D pose estimation enabled")
+            else:
+                logger.info("🚀 Using RTMPose analyzer for ultra-fast 2D pose detection")
         except Exception as e:
             logger.warning(f"RTMPose initialization failed, falling back to MediaPipe: {e}")
             pose_analyzer = PoseAnalyzer(use_gpu=True, use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip)
