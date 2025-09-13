@@ -661,9 +661,9 @@ class RTMPoseAnalyzer:
                     '-pix_fmt', 'yuv420p',
                 ])
             else:
-                logger.info("🖥️ Using simple CPU encoding for FFmpeg 4.3 compatibility")
+                logger.info("🖥️ Using OpenH264 encoder for conda FFmpeg compatibility")
                 ffmpeg_cmd.extend([
-                    '-c:v', 'libx264',
+                    '-c:v', 'libopenh264',
                     '-pix_fmt', 'yuv420p'
                 ])
             
