@@ -661,10 +661,16 @@ class RTMPoseAnalyzer:
                     '-pix_fmt', 'yuv420p',
                 ])
             else:
-                logger.info("🖥️ Using simple MPEG-4 encoding")
+                logger.info("🖥️ Using CPU H.264 encoding for browser compatibility")
                 ffmpeg_cmd.extend([
-                    '-c:v', 'mpeg4',
+                    '-c:v', 'libx264',
+                    '-profile:v', 'baseline',
+                    '-level', '3.0',
                     '-pix_fmt', 'yuv420p',
+                    '-crf', '28',
+                    '-preset', 'ultrafast',
+                    '-movflags', '+faststart',
+                    '-avoid_negative_ts', 'make_zero'
                 ])
             
             ffmpeg_cmd.append(output_path)
