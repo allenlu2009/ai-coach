@@ -37,6 +37,36 @@ def test_rtmpose3d_integration():
         # Test depth estimation vs native 3D
         if analyzer.is_rtmpose3d:
             print("🎯 Native RTMPose3D model loaded - will generate real 3D coordinates")
+            
+            # Test actual RTMPose3D inference with dummy frame
+            print("\n🔬 Testing RTMPose3D inference on dummy frame...")
+            try:
+                import numpy as np
+                # Create a dummy frame (640x480 RGB)
+                dummy_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+                
+                # Run RTMPose3D inference
+                results = analyzer._run_rtmpose3d_inference(dummy_frame)
+                
+                if results:
+                    print(f"✅ RTMPose3D inference successful - detected {len(results)} person(s)")
+                    # Show first few keypoints as example
+                    if results[0]['predictions'] and results[0]['predictions'][0]:
+                        keypoints = results[0]['predictions'][0][0]['keypoints']
+                        print(f"   📊 Generated {len(keypoints)} 3D keypoints")
+                        print(f"   🎯 Sample keypoints (first 3):")
+                        for i, kpt in enumerate(keypoints[:3]):
+                            if len(kpt) >= 3:
+                                print(f"      Keypoint {i:2d}: x={kpt[0]:7.1f}, y={kpt[1]:7.1f}, z={kpt[2]:7.1f}")
+                            else:
+                                print(f"      Keypoint {i:2d}: x={kpt[0]:7.1f}, y={kpt[1]:7.1f}, z=N/A")
+                else:
+                    print("⚠️ RTMPose3D inference returned empty results")
+                    
+            except Exception as e:
+                print(f"❌ RTMPose3D inference test failed: {e}")
+                import traceback
+                print(f"   Traceback: {traceback.format_exc()}")
         else:
             print("🧠 Using intelligent depth estimation - will generate estimated 3D coordinates")
             

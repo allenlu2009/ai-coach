@@ -562,29 +562,56 @@ class RTMPoseAnalyzer:
         """Run RTMPose3D inference for native 3D pose estimation."""
         try:
             from mmpose.apis import inference_topdown
-            from mmdet.apis import inference_detector
+            import numpy as np
             
-            # First detect persons using detection model (needed for RTMPose3D)
-            # For simplicity, create a dummy bbox covering the whole frame
+            # Create a full-frame bounding box as numpy array (required format)
             height, width = frame.shape[:2]
-            bboxes = [[0, 0, width, height, 1.0]]  # [x, y, x2, y2, score]
+            # RTMPose3D expects bboxes in format: [[x1, y1, x2, y2], ...] (no score)
+            bboxes = np.array([[0, 0, width, height]], dtype=np.float32)
             
-            # Run 3D pose estimation
+            # Run 3D pose estimation  
             pose_results = inference_topdown(self.pose3d_model, frame, bboxes)
             
-            # Convert results to match the format expected by the rest of the pipeline
+            # Convert results using RTMPose3D's expected post-processing
             formatted_results = []
             if pose_results and len(pose_results) > 0:
-                for pose_result in pose_results:
-                    # Extract 3D keypoints from RTMPose3D result
+                for idx, pose_result in enumerate(pose_results):
                     if hasattr(pose_result, 'pred_instances'):
-                        keypoints = pose_result.pred_instances.keypoints.cpu().numpy()  # [N, K, 3] format
-                        scores = pose_result.pred_instances.keypoint_scores.cpu().numpy() if hasattr(pose_result.pred_instances, 'keypoint_scores') else None
+                        pred_instances = pose_result.pred_instances
                         
-                        if keypoints.shape[0] > 0:  # If persons detected
-                            # Take first person only
+                        # Handle both torch tensors and numpy arrays
+                        if hasattr(pred_instances.keypoints, 'cpu'):
+                            keypoints = pred_instances.keypoints.cpu().numpy()
+                        else:
+                            keypoints = np.array(pred_instances.keypoints)
+                            
+                        if hasattr(pred_instances.keypoint_scores, 'cpu'):
+                            keypoint_scores = pred_instances.keypoint_scores.cpu().numpy()
+                        else:
+                            keypoint_scores = np.array(pred_instances.keypoint_scores)
+                        
+                        # Handle dimension squeezing as shown in RTMPose3D demo
+                        if keypoint_scores.ndim == 3:
+                            keypoint_scores = np.squeeze(keypoint_scores, axis=1)
+                        if keypoints.ndim == 4:
+                            keypoints = np.squeeze(keypoints, axis=1)
+                        
+                        # RTMPose3D coordinate transformation: -keypoints[..., [0, 2, 1]]
+                        # This maps: x->-x, y->-z, z->-y (coordinate system adjustment)
+                        if keypoints.shape[-1] >= 3:
+                            keypoints = -keypoints[..., [0, 2, 1]]
+                            
+                            # Rebase height (z-axis) to ground level
+                            keypoints[..., 2] -= np.min(keypoints[..., 2], axis=-1, keepdims=True)
+                        
+                        # Take first person and format for our pipeline
+                        if keypoints.shape[0] > 0:
                             person_keypoints = keypoints[0]  # Shape: [K, 3] where K is number of keypoints
-                            person_scores = scores[0] if scores is not None else [0.5] * len(person_keypoints)
+                            person_scores = keypoint_scores[0] if keypoint_scores.ndim > 1 else keypoint_scores
+                            
+                            # Ensure we have the right number of scores
+                            if len(person_scores) != len(person_keypoints):
+                                person_scores = [0.8] * len(person_keypoints)  # Default confidence
                             
                             # Format as expected by downstream processing
                             formatted_result = {
@@ -599,6 +626,8 @@ class RTMPoseAnalyzer:
             
         except Exception as e:
             logger.error(f"RTMPose3D inference failed: {e}")
+            import traceback
+            logger.error(f"RTMPose3D traceback: {traceback.format_exc()}")
             # Fallback to empty results
             return []
     
