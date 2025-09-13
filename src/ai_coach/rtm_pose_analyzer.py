@@ -748,15 +748,26 @@ class RTMPoseAnalyzer:
         
         # Draw pose connections (RTMPose uses COCO-17 keypoint format)
         pose_connections = [
-            # Head and neck
+            # Head and neck connections
             (0, 1), (0, 2), (1, 3), (2, 4),  # nose to eyes, eyes to ears
+            (1, 2),  # eyes to each other
+            
+            # Upper body skeleton
             (5, 6),  # shoulders
-            (5, 7), (7, 9),  # left arm
-            (6, 8), (8, 10),  # right arm
+            (5, 7), (7, 9),  # left arm (shoulder -> elbow -> wrist)
+            (6, 8), (8, 10),  # right arm (shoulder -> elbow -> wrist)
+            
+            # Torso connections (the missing parts!)
             (5, 11), (6, 12),  # shoulders to hips
-            (11, 12),  # hips
-            (11, 13), (13, 15),  # left leg
-            (12, 14), (14, 16),  # right leg
+            (11, 12),  # hips to each other
+            (5, 12), (6, 11),  # cross-torso connections for stability
+            
+            # Lower body skeleton
+            (11, 13), (13, 15),  # left leg (hip -> knee -> ankle)
+            (12, 14), (14, 16),  # right leg (hip -> knee -> ankle)
+            
+            # Additional stability connections
+            (15, 16),  # connect ankles for base stability visualization
         ]
         
         # Draw connections
@@ -768,7 +779,8 @@ class RTMPoseAnalyzer:
                 # Only draw if both points are within frame
                 if (0 <= pt1[0] < width and 0 <= pt1[1] < height and 
                     0 <= pt2[0] < width and 0 <= pt2[1] < height):
-                    cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+                    # Use thicker lines for better visibility during coaching analysis
+                    cv2.line(frame, pt1, pt2, (0, 255, 0), 3)
         
         # Draw keypoints
         for i, point in enumerate(pose_points):
