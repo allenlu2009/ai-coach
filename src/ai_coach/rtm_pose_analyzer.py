@@ -665,12 +665,10 @@ class RTMPoseAnalyzer:
                 ffmpeg_cmd.extend([
                     '-c:v', 'libx264',
                     '-profile:v', 'baseline',
-                    '-level', '3.0',
                     '-pix_fmt', 'yuv420p',
-                    '-crf', '28',
-                    '-preset', 'ultrafast',
-                    '-movflags', '+faststart',
-                    '-avoid_negative_ts', 'make_zero'
+                    '-b:v', '2M',
+                    '-maxrate', '4M',
+                    '-bufsize', '8M'
                 ])
             
             ffmpeg_cmd.append(output_path)
