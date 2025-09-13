@@ -746,28 +746,30 @@ class RTMPoseAnalyzer:
             y = int(landmark.y * height) if landmark.y <= 1.0 else int(landmark.y)
             pose_points.append((x, y))
         
-        # Draw pose connections (RTMPose uses COCO-17 keypoint format)
+        # Draw pose connections using MediaPipe landmark indices
+        # (RTMPose keypoints are converted to MediaPipe format in _convert_rtmpose_keypoints)
         pose_connections = [
             # Head and neck connections
-            (0, 1), (0, 2), (1, 3), (2, 4),  # nose to eyes, eyes to ears
-            (1, 2),  # eyes to each other
+            (0, 2), (0, 5),  # nose to eyes 
+            (2, 7), (5, 8),  # eyes to ears
+            (2, 5),  # eyes to each other
             
             # Upper body skeleton
-            (5, 6),  # shoulders
-            (5, 7), (7, 9),  # left arm (shoulder -> elbow -> wrist)
-            (6, 8), (8, 10),  # right arm (shoulder -> elbow -> wrist)
+            (11, 12),  # shoulders (left_shoulder=11, right_shoulder=12)
+            (11, 13), (13, 15),  # left arm (shoulder -> elbow -> wrist)
+            (12, 14), (14, 16),  # right arm (shoulder -> elbow -> wrist)
             
-            # Torso connections (the missing parts!)
-            (5, 11), (6, 12),  # shoulders to hips
-            (11, 12),  # hips to each other
-            (5, 12), (6, 11),  # cross-torso connections for stability
+            # Torso connections - THE CRITICAL FIXES!
+            (11, 23), (12, 24),  # shoulders to hips (left_hip=23, right_hip=24)
+            (23, 24),  # hips to each other
+            (11, 24), (12, 23),  # cross-torso connections for stability
             
-            # Lower body skeleton
-            (11, 13), (13, 15),  # left leg (hip -> knee -> ankle)
-            (12, 14), (14, 16),  # right leg (hip -> knee -> ankle)
+            # Lower body skeleton - THE MISSING CONNECTIONS!
+            (23, 25), (25, 27),  # left leg (hip -> knee -> ankle)
+            (24, 26), (26, 28),  # right leg (hip -> knee -> ankle)
             
             # Additional stability connections
-            (15, 16),  # connect ankles for base stability visualization
+            (27, 28),  # connect ankles for base stability visualization
         ]
         
         # Draw connections
