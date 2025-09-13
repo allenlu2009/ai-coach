@@ -762,14 +762,10 @@ class RTMPoseAnalyzer:
             # Torso connections - THE CRITICAL FIXES!
             (11, 23), (12, 24),  # shoulders to hips (left_hip=23, right_hip=24)
             (23, 24),  # hips to each other
-            (11, 24), (12, 23),  # cross-torso connections for stability
             
             # Lower body skeleton - THE MISSING CONNECTIONS!
             (23, 25), (25, 27),  # left leg (hip -> knee -> ankle)
             (24, 26), (26, 28),  # right leg (hip -> knee -> ankle)
-            
-            # Additional stability connections
-            (27, 28),  # connect ankles for base stability visualization
         ]
         
         # Draw connections
