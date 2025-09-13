@@ -963,13 +963,16 @@ class RTMPoseAnalyzer:
         # Draw pose landmarks and connections
         height, width = frame.shape[:2]
         
-        # Convert landmarks to pixel coordinates
+        # Convert landmarks to pixel coordinates with 3D depth info
         pose_points = []
+        pose_depths = []
         for landmark in frame_analysis.landmarks:
             # RTMPose landmarks are in image coordinates (pixels)
             x = int(landmark.x * width) if landmark.x <= 1.0 else int(landmark.x)
             y = int(landmark.y * height) if landmark.y <= 1.0 else int(landmark.y)
+            z = landmark.z  # Keep original 3D depth coordinate
             pose_points.append((x, y))
+            pose_depths.append(z)
         
         # Draw pose connections using MediaPipe landmark indices
         # (RTMPose keypoints are converted to MediaPipe format in _convert_rtmpose_keypoints)
@@ -993,7 +996,7 @@ class RTMPoseAnalyzer:
             (24, 26), (26, 28),  # right leg (hip -> knee -> ankle)
         ]
         
-        # Draw connections
+        # Draw connections with 3D depth visualization
         for connection in pose_connections:
             if connection[0] < len(pose_points) and connection[1] < len(pose_points):
                 pt1 = pose_points[connection[0]]
@@ -1002,28 +1005,66 @@ class RTMPoseAnalyzer:
                 # Only draw if both points are within frame
                 if (0 <= pt1[0] < width and 0 <= pt1[1] < height and 
                     0 <= pt2[0] < width and 0 <= pt2[1] < height):
-                    # Use thicker lines for better visibility during coaching analysis
-                    cv2.line(frame, pt1, pt2, (0, 255, 0), 3)
+                    
+                    # Use depth information for visual cues
+                    if connection[0] < len(pose_depths) and connection[1] < len(pose_depths):
+                        avg_depth = (pose_depths[connection[0]] + pose_depths[connection[1]]) / 2
+                        # Map depth to color intensity (closer = brighter green, farther = darker)
+                        if self.use_3d:
+                            depth_intensity = max(0.3, min(1.0, (avg_depth + 2.0) / 4.0))  # Normalize depth
+                            color = (0, int(255 * depth_intensity), 0)
+                            thickness = max(2, int(3 * depth_intensity))  # Thicker lines for closer objects
+                        else:
+                            color = (0, 255, 0)
+                            thickness = 3
+                    else:
+                        color = (0, 255, 0)  
+                        thickness = 3
+                    
+                    cv2.line(frame, pt1, pt2, color, thickness)
         
-        # Draw keypoints
+        # Draw keypoints with 3D depth visualization
         for i, point in enumerate(pose_points):
             if 0 <= point[0] < width and 0 <= point[1] < height:
+                # Get depth information for size and color modulation
+                depth = pose_depths[i] if i < len(pose_depths) else 0.0
+                
                 # Different colors for different body parts
                 if i < 5:  # Head keypoints
-                    color = (255, 0, 0)  # Blue
+                    base_color = (255, 0, 0)  # Blue
                 elif i < 11:  # Arms
-                    color = (0, 255, 255)  # Yellow
+                    base_color = (0, 255, 255)  # Yellow
                 else:  # Legs
-                    color = (255, 0, 255)  # Magenta
+                    base_color = (255, 0, 255)  # Magenta
                 
-                cv2.circle(frame, point, 4, color, -1)
-                cv2.circle(frame, point, 5, (255, 255, 255), 1)  # White outline
+                # Modulate color and size based on depth in 3D mode
+                if self.use_3d:
+                    depth_factor = max(0.4, min(1.0, (depth + 2.0) / 4.0))  # Normalize depth
+                    color = tuple(int(c * depth_factor) for c in base_color)
+                    radius = max(3, int(6 * depth_factor))  # Larger circles for closer points
+                else:
+                    color = base_color
+                    radius = 4
+                
+                cv2.circle(frame, point, radius, color, -1)
+                cv2.circle(frame, point, radius + 1, (255, 255, 255), 1)  # White outline
         
-        # Add confidence score text
+        # Add confidence score and 3D mode indicator
         if frame_analysis.confidence_score > 0:
             text = f"Confidence: {frame_analysis.confidence_score:.2f}"
             cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
                        0.7, (0, 255, 0), 2)
+        
+        # Add 3D mode indicator with depth visualization guide
+        if self.use_3d:
+            mode_text = "3D Mode: RTMPose3D" if self.is_rtmpose3d else "3D Mode: Depth Est."
+            cv2.putText(frame, mode_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 
+                       0.6, (255, 255, 0), 2)
+            
+            # Add depth visualization legend
+            legend_text = "Depth: Brighter/Larger = Closer"
+            cv2.putText(frame, legend_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 
+                       0.5, (255, 255, 255), 1)
         
         return frame
     
