@@ -126,16 +126,19 @@ class RTMPoseAnalyzer:
                     
                     # Use RTMPose3D configuration and checkpoint
                     config_path = '/mnt/c/Users/allen/我的雲端硬碟/github/mmpose/projects/rtmpose3d/configs/rtmw3d-l_8xb64_cocktail14-384x288.py'
-                    # For now, we'll need to download the checkpoint - using init_model approach
+                    checkpoint_path = '/mnt/c/Users/allen/我的雲端硬碟/claude_code/ai_coach/model/rtmw3d-l_8xb64_cocktail14-384x288-794dbc78_20240626.pth'
                     
                     logger.info("🚀 Initializing RTMPose3D with native 3D coordinates")
+                    logger.info(f"📂 Using local checkpoint: {checkpoint_path}")
                     
-                    # Try to initialize RTMPose3D model directly
-                    checkpoint_url = "https://download.openmmlab.com/mmpose/v1/projects/rtmpose3d/rtmw3d-l_cock14-0d4ad840_20240422.pth"
+                    # Verify checkpoint file exists
+                    import os
+                    if not os.path.exists(checkpoint_path):
+                        raise FileNotFoundError(f"RTMPose3D checkpoint not found at {checkpoint_path}")
                     
                     try:
-                        # Attempt to use init_model with RTMPose3D config
-                        self.pose3d_model = init_model(config_path, checkpoint_url, device=device)
+                        # Attempt to use init_model with local RTMPose3D checkpoint
+                        self.pose3d_model = init_model(config_path, checkpoint_path, device=device)
                         self.is_rtmpose3d = True
                         logger.info("✅ RTMPose3D model loaded successfully with native 3D coordinates")
                     except Exception as checkpoint_error:

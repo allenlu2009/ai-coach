@@ -1,0 +1,11 @@
+# Ignore large model checkpoint files but track directory structure
+*.pth
+*.pt
+*.bin
+*.safetensors
+
+# Keep this .gitignore file
+!.gitignore
+
+# Optional: Add README for model directory
+!README.md
