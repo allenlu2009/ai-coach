@@ -70,6 +70,7 @@ class RTMPoseAnalyzer:
         # Model will be initialized when dependencies are ready
         self.model = None
         self.model_initialized = False
+        self.is_rtmpose3d = False  # Track if using real RTMPose3D model
         
         # Thread pool for CPU-intensive operations
         self.thread_pool = ThreadPoolExecutor(max_workers=2)
@@ -110,18 +111,49 @@ class RTMPoseAnalyzer:
             
             # Choose model based on 2D/3D mode
             if self.use_3d:
-                # Try different 3D models in order of preference
-                model_options = ['human', 'wholebody']  # Fallback to 2D if 3D not available
-                model_name = 'human'  # Default fallback
-                
-                logger.info("🔮 Attempting to initialize 3D pose estimation...")
-                # For now, use regular model - 3D processing will be handled post-processing
-                # Future: integrate dedicated 3D models when available
-                self.inferencer = MMPoseInferencer(model_name, device=device)
-                logger.info(f"📐 3D mode enabled (using {model_name} with depth estimation)")
+                logger.info("🔮 Attempting to initialize RTMPose3D model...")
+                try:
+                    # Try to use RTMPose3D models
+                    # Add rtmpose3d to Python path for imports
+                    import sys
+                    rtmpose3d_path = '/mnt/c/Users/allen/我的雲端硬碟/github/mmpose/projects/rtmpose3d'
+                    if rtmpose3d_path not in sys.path:
+                        sys.path.insert(0, rtmpose3d_path)
+                    
+                    # Import RTMPose3D components
+                    from mmpose.apis import init_model
+                    import rtmpose3d  # This registers the 3D models
+                    
+                    # Use RTMPose3D configuration and checkpoint
+                    config_path = '/mnt/c/Users/allen/我的雲端硬碟/github/mmpose/projects/rtmpose3d/configs/rtmw3d-l_8xb64_cocktail14-384x288.py'
+                    # For now, we'll need to download the checkpoint - using init_model approach
+                    
+                    logger.info("🚀 Initializing RTMPose3D with native 3D coordinates")
+                    
+                    # Try to initialize RTMPose3D model directly
+                    checkpoint_url = "https://download.openmmlab.com/mmpose/v1/projects/rtmpose3d/rtmw3d-l_cock14-0d4ad840_20240422.pth"
+                    
+                    try:
+                        # Attempt to use init_model with RTMPose3D config
+                        self.pose3d_model = init_model(config_path, checkpoint_url, device=device)
+                        self.is_rtmpose3d = True
+                        logger.info("✅ RTMPose3D model loaded successfully with native 3D coordinates")
+                    except Exception as checkpoint_error:
+                        logger.warning(f"RTMPose3D checkpoint not available: {checkpoint_error}")
+                        logger.info("🔄 Using 2D model with intelligent depth estimation")
+                        self.inferencer = MMPoseInferencer('human', device=device) 
+                        self.is_rtmpose3d = False
+                    
+                except Exception as e:
+                    logger.warning(f"RTMPose3D initialization failed: {e}")
+                    logger.info("🔄 Falling back to 2D model with depth estimation")
+                    self.inferencer = MMPoseInferencer('human', device=device)
+                    self.is_rtmpose3d = False
+                    logger.info("📐 3D mode enabled (using estimated depth coordinates)")
             else:
                 # Standard 2D pose detection
                 self.inferencer = MMPoseInferencer('human', device=device)
+                self.is_rtmpose3d = False
                 logger.info("📊 2D pose detection mode")
             
             self.model_initialized = True
@@ -271,10 +303,14 @@ class RTMPoseAnalyzer:
         return frame_analyses
     
     async def _analyze_single_frame(self, frame: np.ndarray, frame_idx: int, timestamp: float) -> FrameAnalysis:
-        """Analyze a single frame using RTMPose."""
+        """Analyze a single frame using RTMPose or RTMPose3D."""
         try:
-            # Run RTMPose inference using the modern inferencer
-            results = list(self.inferencer(frame, show=False, return_vis=False))
+            if self.is_rtmpose3d and hasattr(self, 'pose3d_model'):
+                # Use RTMPose3D model for native 3D pose estimation
+                results = self._run_rtmpose3d_inference(frame)
+            else:
+                # Run standard RTMPose inference using the modern inferencer
+                results = list(self.inferencer(frame, show=False, return_vis=False))
             
             # Process results - the inferencer returns a generator with predictions
             poses_detected = 0
@@ -405,8 +441,11 @@ class RTMPoseAnalyzer:
                     norm_x = x / width if width > 0 else 0.0
                     norm_y = y / height if height > 0 else 0.0
                     
-                    # Generate Z coordinate for 3D mode
-                    if self.use_3d:
+                    # Handle Z coordinate for 3D mode
+                    if self.use_3d and len(keypoint) >= 3 and self.is_rtmpose3d:
+                        # Use native 3D coordinates from RTMPose3D
+                        norm_z = keypoint[2]  # RTMPose3D provides actual Z coordinate
+                    elif self.use_3d:
                         # Estimate depth based on pose geometry and keypoint position
                         norm_z = self._estimate_depth_coordinate(rtm_idx, norm_x, norm_y, confidence)
                     else:
@@ -515,6 +554,50 @@ class RTMPoseAnalyzer:
         
         # Clamp to reasonable depth range for coaching analysis
         return max(-50.0, min(50.0, final_depth))
+    
+    def _run_rtmpose3d_inference(self, frame: np.ndarray):
+        """Run RTMPose3D inference for native 3D pose estimation."""
+        try:
+            from mmpose.apis import inference_topdown
+            from mmdet.apis import inference_detector
+            
+            # First detect persons using detection model (needed for RTMPose3D)
+            # For simplicity, create a dummy bbox covering the whole frame
+            height, width = frame.shape[:2]
+            bboxes = [[0, 0, width, height, 1.0]]  # [x, y, x2, y2, score]
+            
+            # Run 3D pose estimation
+            pose_results = inference_topdown(self.pose3d_model, frame, bboxes)
+            
+            # Convert results to match the format expected by the rest of the pipeline
+            formatted_results = []
+            if pose_results and len(pose_results) > 0:
+                for pose_result in pose_results:
+                    # Extract 3D keypoints from RTMPose3D result
+                    if hasattr(pose_result, 'pred_instances'):
+                        keypoints = pose_result.pred_instances.keypoints.cpu().numpy()  # [N, K, 3] format
+                        scores = pose_result.pred_instances.keypoint_scores.cpu().numpy() if hasattr(pose_result.pred_instances, 'keypoint_scores') else None
+                        
+                        if keypoints.shape[0] > 0:  # If persons detected
+                            # Take first person only
+                            person_keypoints = keypoints[0]  # Shape: [K, 3] where K is number of keypoints
+                            person_scores = scores[0] if scores is not None else [0.5] * len(person_keypoints)
+                            
+                            # Format as expected by downstream processing
+                            formatted_result = {
+                                'predictions': [[{
+                                    'keypoints': person_keypoints.tolist(),  # Include x, y, z coordinates
+                                    'keypoint_scores': person_scores.tolist() if hasattr(person_scores, 'tolist') else list(person_scores)
+                                }]]
+                            }
+                            formatted_results.append(formatted_result)
+            
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"RTMPose3D inference failed: {e}")
+            # Fallback to empty results
+            return []
     
     def _convert_mmpose_keypoints(self, keypoints: np.ndarray, frame_shape: Tuple[int, int]) -> List[PoseLandmark]:
         """Convert MMPose keypoints to PoseLandmark format (legacy method for compatibility)."""
