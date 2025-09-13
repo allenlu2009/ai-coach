@@ -8,6 +8,7 @@ pose analysis, coaching feedback, and real-time chat functionality.
 import asyncio
 import json
 import logging
+import os
 import uuid
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -28,6 +29,7 @@ from .models import (
 from .video_processor import VideoProcessor
 from .coach_agent import CoachAgent
 from .pose_analyzer import PoseAnalyzer
+from .rtm_pose_analyzer import RTMPoseAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +150,21 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
         allow_headers=["*"],
     )
     
-    # Initialize core components
-    pose_analyzer = PoseAnalyzer(use_gpu=True, use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip)
+    # Initialize core components - use RTMPose if available, fallback to MediaPipe
+    use_rtmpose = os.getenv('USE_RTMPOSE', 'true').lower() == 'true'
+    
+    if use_rtmpose:
+        try:
+            pose_analyzer = RTMPoseAnalyzer(
+                use_gpu_encoding=use_gpu_encoding, 
+                frame_skip=frame_skip
+            )
+            logger.info("🚀 Using RTMPose analyzer for ultra-fast pose detection")
+        except Exception as e:
+            logger.warning(f"RTMPose initialization failed, falling back to MediaPipe: {e}")
+            pose_analyzer = PoseAnalyzer(use_gpu=True, use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip)
+    else:
+        pose_analyzer = PoseAnalyzer(use_gpu=True, use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip)
     video_processor = VideoProcessor(
         uploads_dir=uploads_dir, 
         pose_analyzer=pose_analyzer, 

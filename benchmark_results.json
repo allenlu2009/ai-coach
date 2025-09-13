@@ -1,0 +1,26 @@
+{
+  "mediapipe": {
+    "analyzer": "MediaPipe",
+    "status": "failed",
+    "total_time": 0.043982505798339844,
+    "error": "7 validation errors for VideoMetadata\nvideo_id\n  Value error, video_id must be a valid UUID [type=value_error, input_value='test_mediapipe', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.10/v/value_error\nfile_size_mb\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nduration_seconds\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nfps\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\ntotal_frames\n  Input should be greater than 0 [type=greater_than, input_value=0, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nresolution_width\n  Input should be greater than 0 [type=greater_than, input_value=0, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nresolution_height\n  Input should be greater than 0 [type=greater_than, input_value=0, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than",
+    "total_frames": 0,
+    "poses_detected": 0,
+    "fps": 0,
+    "detection_rate": 0,
+    "gpu_memory_mb": 0
+  },
+  "rtmpose": {
+    "analyzer": "RTMPose",
+    "status": "failed",
+    "total_time": 10.82714033126831,
+    "error": "7 validation errors for VideoMetadata\nvideo_id\n  Value error, video_id must be a valid UUID [type=value_error, input_value='test_rtmpose', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.10/v/value_error\nfile_size_mb\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nduration_seconds\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nfps\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\ntotal_frames\n  Input should be greater than 0 [type=greater_than, input_value=0, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nresolution_width\n  Input should be greater than 0 [type=greater_than, input_value=0, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than\nresolution_height\n  Input should be greater than 0 [type=greater_than, input_value=0, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.10/v/greater_than",
+    "total_frames": 0,
+    "poses_detected": 0,
+    "fps": 0,
+    "detection_rate": 0,
+    "gpu_memory_mb": 0
+  },
+  "test_video": "examples/deadlift.mp4",
+  "timestamp": 1757603585.3935964
+}
