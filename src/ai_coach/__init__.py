@@ -5,7 +5,7 @@ A comprehensive system for analyzing athlete poses from uploaded videos and prov
 conversational feedback through an AI-powered chat interface.
 
 This package provides:
-- MediaPipe-based pose detection and 3D landmark extraction
+- RTMPose-based pose detection with native 3D landmark extraction
 - Real-time video processing optimized for RTX 3060 GPU  
 - AI-powered coaching feedback and conversation
 - FastAPI web interface with video upload and chat capabilities
@@ -25,14 +25,14 @@ from .models import (
 
 # Main components - conditional imports for testing
 try:
-    from .pose_analyzer import PoseAnalyzer
+    from .rtm_pose_analyzer import RTMPoseAnalyzer
     from .video_processor import VideoProcessor  
     from .coach_agent import CoachAgent
     from .api import create_app
     _FULL_IMPORTS = True
 except ImportError:
     # Gracefully handle missing dependencies for basic testing
-    PoseAnalyzer = None
+    RTMPoseAnalyzer = None
     VideoProcessor = None
     CoachAgent = None
     create_app = None
@@ -51,7 +51,7 @@ __all__ = [
     "CoachingFeedback",
     
     # Core components
-    "PoseAnalyzer",
+    "RTMPoseAnalyzer",
     "VideoProcessor",
     "CoachAgent",
     

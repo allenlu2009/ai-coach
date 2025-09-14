@@ -25,7 +25,7 @@ from .models import (
     VideoMetadata, 
     ProcessingStatus,
 )
-from .pose_analyzer import PoseAnalyzer
+from .rtm_pose_analyzer import RTMPoseAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class VideoProcessor:
     
     def __init__(self, 
                  uploads_dir: str = "uploads",
-                 pose_analyzer: Optional[PoseAnalyzer] = None,
+                 pose_analyzer: Optional[RTMPoseAnalyzer] = None,
                  use_gpu_encoding: bool = False,
                  create_video_overlay: bool = False,
                  frame_skip: int = 3):
@@ -56,7 +56,7 @@ class VideoProcessor:
         
         Args:
             uploads_dir: Directory for temporary video storage
-            pose_analyzer: PoseAnalyzer instance (created if None)
+            pose_analyzer: RTMPoseAnalyzer instance (created if None)
             use_gpu_encoding: Whether to use GPU acceleration for FFmpeg video encoding
             create_video_overlay: Whether to create video overlay (default: False for JSON-only)
             frame_skip: Analyze every Nth frame for performance (default: 3)
@@ -73,10 +73,11 @@ class VideoProcessor:
         # Store configuration
         self.create_video_overlay = create_video_overlay
         
-        # Initialize pose analyzer with frame skipping
-        self.pose_analyzer = pose_analyzer or PoseAnalyzer(
+        # Initialize RTMPose analyzer with frame skipping and 3D support
+        self.pose_analyzer = pose_analyzer or RTMPoseAnalyzer(
             use_gpu_encoding=use_gpu_encoding, 
-            frame_skip=frame_skip
+            frame_skip=frame_skip,
+            use_3d=True  # Enable 3D pose estimation with RTMPose3D
         )
         
         # Active processing jobs (video_id -> progress info)

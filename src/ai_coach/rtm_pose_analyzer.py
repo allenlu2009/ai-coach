@@ -338,7 +338,13 @@ class RTMPoseAnalyzer:
                             primary_pose = pose_predictions[0]  # Use the first detected person
                             
                             if isinstance(primary_pose, dict) and 'keypoints' in primary_pose:
-                                keypoints = primary_pose['keypoints']  # List of [x, y] coordinates
+                                # For RTMPose3D, use original pixel coordinates for 2D overlay
+                                if self.is_rtmpose3d and 'keypoints_2d_overlay' in primary_pose:
+                                    keypoints = primary_pose['keypoints_2d_overlay']  # Original pixel coordinates
+                                    logger.info("🎯 Using RTMPose3D original coordinates for 2D overlay")
+                                else:
+                                    keypoints = primary_pose['keypoints']  # Standard coordinates
+                                    
                                 keypoint_scores = primary_pose.get('keypoint_scores', [])
                                 
                                 # Convert to our PoseLandmark format (always returns exactly 33 landmarks)
@@ -596,17 +602,23 @@ class RTMPoseAnalyzer:
                         if keypoints.ndim == 4:
                             keypoints = np.squeeze(keypoints, axis=1)
                         
-                        # RTMPose3D coordinate transformation: -keypoints[..., [0, 2, 1]]
-                        # This maps: x->-x, y->-z, z->-y (coordinate system adjustment)
+                        # Store original keypoints for 2D overlay (pixel coordinates)
+                        original_keypoints = keypoints.copy()
+                        
+                        # Apply RTMPose3D coordinate transformation for 3D analysis
+                        # Following official demo: -keypoints[..., [0, 2, 1]]
                         if keypoints.shape[-1] >= 3:
+                            # Apply the standard RTMPose3D coordinate transformation
                             keypoints = -keypoints[..., [0, 2, 1]]
                             
-                            # Rebase height (z-axis) to ground level
+                            # Optional: rebase height (z-axis) to ground level
+                            # Following the official demo's approach
                             keypoints[..., 2] -= np.min(keypoints[..., 2], axis=-1, keepdims=True)
                         
                         # Take first person and format for our pipeline
                         if keypoints.shape[0] > 0:
-                            person_keypoints = keypoints[0]  # Shape: [K, 3] where K is number of keypoints
+                            person_keypoints = keypoints[0]  # Shape: [K, 3] - transformed 3D coordinates
+                            original_person_keypoints = original_keypoints[0]  # Shape: [K, 3] - original pixel coordinates
                             person_scores = keypoint_scores[0] if keypoint_scores.ndim > 1 else keypoint_scores
                             
                             # Ensure we have the right number of scores
@@ -614,9 +626,11 @@ class RTMPoseAnalyzer:
                                 person_scores = [0.8] * len(person_keypoints)  # Default confidence
                             
                             # Format as expected by downstream processing
+                            # Include both original (for 2D overlay) and transformed (for 3D analysis) coordinates
                             formatted_result = {
                                 'predictions': [[{
-                                    'keypoints': person_keypoints.tolist(),  # Include x, y, z coordinates
+                                    'keypoints': person_keypoints.tolist(),  # 3D transformed coordinates
+                                    'keypoints_2d_overlay': original_person_keypoints.tolist(),  # Original pixel coordinates for overlay
                                     'keypoint_scores': person_scores.tolist() if hasattr(person_scores, 'tolist') else list(person_scores)
                                 }]]
                             }

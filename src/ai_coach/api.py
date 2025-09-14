@@ -28,7 +28,6 @@ from .models import (
 )
 from .video_processor import VideoProcessor
 from .coach_agent import CoachAgent
-from .pose_analyzer import PoseAnalyzer
 from .rtm_pose_analyzer import RTMPoseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -166,10 +165,11 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
             else:
                 logger.info("🚀 Using RTMPose analyzer for ultra-fast 2D pose detection")
         except Exception as e:
-            logger.warning(f"RTMPose initialization failed, falling back to MediaPipe: {e}")
-            pose_analyzer = PoseAnalyzer(use_gpu=True, use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip)
+            logger.error(f"RTMPose initialization failed: {e}")
+            raise RuntimeError(f"RTMPose required but failed to initialize: {e}")
     else:
-        pose_analyzer = PoseAnalyzer(use_gpu=True, use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip)
+        # Default to RTMPose with 3D support
+        pose_analyzer = RTMPoseAnalyzer(use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip, use_3d=use_3d)
     video_processor = VideoProcessor(
         uploads_dir=uploads_dir, 
         pose_analyzer=pose_analyzer, 
