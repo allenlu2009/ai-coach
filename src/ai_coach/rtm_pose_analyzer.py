@@ -456,19 +456,19 @@ class RTMPoseAnalyzer:
                         # Based on analysis: X: 1.653 to 2.827, Y: -1.330 to 0.251
                         # Person appears to be center-left in the image
                         
-                        # Estimate person's center position in image (adjust based on actual position)
-                        person_center_x = width * 0.4  # Person appears to be left of center
-                        person_center_y = height * 0.6  # Person appears to be in lower part
+                        # Center person in image (more robust for different videos)
+                        person_center_x = width * 0.5   # Center horizontally
+                        person_center_y = height * 0.55  # Slightly below center vertically
                         
-                        # RTMPose3D coordinate ranges observed
+                        # RTMPose3D coordinate ranges observed from testing
                         rtm_x_range = 2.827 - 1.653  # ~1.17
                         rtm_y_range = 0.251 - (-1.330)  # ~1.58
                         rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
                         rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
                         
-                        # Scale to fit person's typical size in image
-                        person_scale_x = width * 0.15  # Person width ~15% of image
-                        person_scale_y = height * 0.4   # Person height ~40% of image  
+                        # Increase scale to better match person size in frame
+                        person_scale_x = width * 0.25   # Person width ~25% of image (increased from 15%)
+                        person_scale_y = height * 0.6   # Person height ~60% of image (increased from 40%)  
                         
                         # Map RTMPose3D coordinates to image coordinates
                         pixel_x = person_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
