@@ -887,34 +887,45 @@ class AICoachApp {
 
     // Check if 3D visualization is available and enable the tab
     async check3dVisualizationAvailability(videoId) {
+        console.log(`🔍 Checking 3D visualization for video ID: ${videoId}`);
         try {
-            const response = await fetch(`${this.API_BASE}/videos/${videoId}/3d-visualizations`);
+            const url = `${this.API_BASE}/videos/${videoId}/3d-visualizations`;
+            console.log(`🔍 Fetching: ${url}`);
+            const response = await fetch(url);
+            console.log(`🔍 Response status: ${response.status}`);
             if (response.ok) {
                 const data = await response.json();
+                console.log(`🔍 Response data:`, data);
                 if (data.frames && data.frames.length > 0) {
                     // 3D poses are available - show the 3D tab
+                    console.log(`✅ 3D visualization available with ${data.frames.length} frames - enabling tab`);
                     this.enable3dTab();
-                    console.log(`3D visualization available with ${data.frames.length} frames`);
                 } else {
-                    console.log('3D visualization not available - no frames found');
+                    console.log('❌ 3D visualization not available - no frames found');
                 }
             } else {
-                console.log('3D visualization endpoint not available');
+                console.log(`❌ 3D visualization endpoint returned: ${response.status}`);
             }
         } catch (error) {
-            console.log('3D visualization check failed:', error);
+            console.log('❌ 3D visualization check failed:', error);
         }
     }
 
     // Enable the 3D Poses tab
     enable3dTab() {
+        console.log('🎯 Attempting to enable 3D Poses tab...');
         const tab3dBtn = document.querySelector('button[data-tab="3d-visualization"]');
+        console.log('🎯 Tab button element:', tab3dBtn);
         if (tab3dBtn) {
+            console.log('🎯 Tab button classes before:', tab3dBtn.className);
+            console.log('🎯 Tab button style.display before:', tab3dBtn.style.display);
             tab3dBtn.classList.remove('hidden');
             tab3dBtn.style.display = 'flex'; // Ensure it's visible
-            console.log('3D Poses tab enabled');
+            console.log('🎯 Tab button classes after:', tab3dBtn.className);
+            console.log('🎯 Tab button style.display after:', tab3dBtn.style.display);
+            console.log('✅ 3D Poses tab enabled successfully');
         } else {
-            console.log('3D tab button not found');
+            console.log('❌ 3D tab button not found in DOM');
         }
     }
 }
