@@ -127,25 +127,75 @@
                         </div>
                     </div>
 
-                    <!-- Video Player -->
+                    <!-- Video Player with Tabs -->
                     <div class="video-panel">
-                        <h3>Pose Analysis Video</h3>
-                        <div class="video-container">
-                            <video id="analysisVideo" controls class="analysis-video" style="width: 100%; height: auto; display: block;">
-                                Your browser does not support the video tag.
-                            </video>
-                            <div id="videoPlaceholder" class="video-placeholder hidden">
+                        <h3>Pose Analysis Results</h3>
+                        
+                        <!-- Visualization Tabs -->
+                        <div class="viz-tabs">
+                            <button class="tab-btn active" data-tab="2d-video">
                                 <i class="fas fa-video"></i>
-                                <p>Analysis video will appear here</p>
+                                2D Video
+                            </button>
+                            <button class="tab-btn" data-tab="3d-visualization">
+                                <i class="fas fa-cube"></i>
+                                3D Poses
+                            </button>
+                        </div>
+                        
+                        <!-- 2D Video Tab Content -->
+                        <div id="2d-video" class="tab-content active">
+                            <div class="video-container">
+                                <video id="analysisVideo" controls class="analysis-video" style="width: 100%; height: auto; display: block;">
+                                    Your browser does not support the video tag.
+                                </video>
+                                <div id="videoPlaceholder" class="video-placeholder hidden">
+                                    <i class="fas fa-video"></i>
+                                    <p>Analysis video will appear here</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Video Controls -->
+                            <div class="video-controls">
+                                <button id="downloadBtn" class="control-btn" disabled>
+                                    <i class="fas fa-download"></i>
+                                    Download Analysis
+                                </button>
                             </div>
                         </div>
                         
-                        <!-- Video Controls -->
-                        <div class="video-controls">
-                            <button id="downloadBtn" class="control-btn" disabled>
-                                <i class="fas fa-download"></i>
-                                Download Analysis
-                            </button>
+                        <!-- 3D Visualization Tab Content -->
+                        <div id="3d-visualization" class="tab-content">
+                            <div class="viz-3d-container">
+                                <div id="viz3dPlaceholder" class="viz-3d-placeholder">
+                                    <i class="fas fa-cube"></i>
+                                    <p>3D pose visualizations will appear here</p>
+                                    <small>Available when using RTMPose3D with --use-3d flag</small>
+                                </div>
+                                
+                                <!-- 3D Visualization Gallery -->
+                                <div id="viz3dGallery" class="viz-3d-gallery hidden">
+                                    <div class="viz-3d-controls">
+                                        <button id="viz3dPrevBtn" class="control-btn">
+                                            <i class="fas fa-chevron-left"></i>
+                                            Previous
+                                        </button>
+                                        <span id="viz3dFrameInfo" class="frame-info">Frame 1 of 100</span>
+                                        <button id="viz3dNextBtn" class="control-btn">
+                                            <i class="fas fa-chevron-right"></i>
+                                            Next
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="viz-3d-viewer">
+                                        <img id="viz3dImage" class="viz-3d-image" alt="3D Pose Visualization">
+                                    </div>
+                                    
+                                    <div class="viz-3d-timeline">
+                                        <input type="range" id="viz3dSlider" class="viz-3d-slider" min="0" max="100" value="0">
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

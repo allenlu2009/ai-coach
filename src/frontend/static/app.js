@@ -24,6 +24,7 @@ class AICoachApp {
     init() {
         this.setupEventListeners();
         this.setupWebSocket();
+        this.setup3dVisualization();
         this.updateConnectionStatus(false);
     }
     
@@ -770,6 +771,115 @@ class AICoachApp {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    }
+    
+    // 3D Visualization Tab Management
+    setup3dVisualization() {
+        // Tab switching functionality
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
+        });
+        
+        // 3D visualization controls
+        const prevBtn = document.getElementById('viz3dPrevBtn');
+        const nextBtn = document.getElementById('viz3dNextBtn');
+        const slider = document.getElementById('viz3dSlider');
+        
+        if (prevBtn) prevBtn.addEventListener('click', () => this.navigate3dFrame(-1));
+        if (nextBtn) nextBtn.addEventListener('click', () => this.navigate3dFrame(1));
+        if (slider) slider.addEventListener('input', (e) => this.set3dFrame(parseInt(e.target.value)));
+    }
+    
+    switchTab(tabId) {
+        // Update tab buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabId);
+        });
+        
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === tabId);
+        });
+        
+        // Load 3D visualizations if switching to 3D tab
+        if (tabId === '3d-visualization' && this.currentVideoId) {
+            this.load3dVisualizations();
+        }
+    }
+    
+    async load3dVisualizations() {
+        if (!this.currentVideoId) return;
+        
+        try {
+            const response = await fetch(`${this.API_BASE}/videos/${this.currentVideoId}/3d-visualizations`);
+            const data = await response.json();
+            
+            if (data.count > 0) {
+                this.viz3dFrames = data.frames;
+                this.currentViz3dFrame = 0;
+                this.show3dGallery();
+                this.update3dVisualization();
+            } else {
+                this.show3dPlaceholder();
+            }
+        } catch (error) {
+            console.error('Error loading 3D visualizations:', error);
+            this.show3dPlaceholder();
+        }
+    }
+    
+    show3dGallery() {
+        const placeholder = document.getElementById('viz3dPlaceholder');
+        const gallery = document.getElementById('viz3dGallery');
+        
+        if (placeholder) placeholder.classList.add('hidden');
+        if (gallery) gallery.classList.remove('hidden');
+    }
+    
+    show3dPlaceholder() {
+        const placeholder = document.getElementById('viz3dPlaceholder');
+        const gallery = document.getElementById('viz3dGallery');
+        
+        if (placeholder) placeholder.classList.remove('hidden');
+        if (gallery) gallery.classList.add('hidden');
+    }
+    
+    navigate3dFrame(direction) {
+        if (!this.viz3dFrames || this.viz3dFrames.length === 0) return;
+        
+        this.currentViz3dFrame += direction;
+        this.currentViz3dFrame = Math.max(0, Math.min(this.viz3dFrames.length - 1, this.currentViz3dFrame));
+        this.update3dVisualization();
+    }
+    
+    set3dFrame(frameIndex) {
+        if (!this.viz3dFrames || this.viz3dFrames.length === 0) return;
+        
+        this.currentViz3dFrame = Math.max(0, Math.min(this.viz3dFrames.length - 1, frameIndex));
+        this.update3dVisualization();
+    }
+    
+    update3dVisualization() {
+        if (!this.viz3dFrames || this.viz3dFrames.length === 0) return;
+        
+        const frame = this.viz3dFrames[this.currentViz3dFrame];
+        const image = document.getElementById('viz3dImage');
+        const frameInfo = document.getElementById('viz3dFrameInfo');
+        const slider = document.getElementById('viz3dSlider');
+        
+        if (image) {
+            image.src = `${this.API_BASE}${frame.url}`;
+            image.alt = `3D Pose Visualization - Frame ${frame.frame_number}`;
+        }
+        
+        if (frameInfo) {
+            frameInfo.textContent = `Frame ${this.currentViz3dFrame + 1} of ${this.viz3dFrames.length}`;
+        }
+        
+        if (slider) {
+            slider.max = this.viz3dFrames.length - 1;
+            slider.value = this.currentViz3dFrame;
+        }
     }
 }
 

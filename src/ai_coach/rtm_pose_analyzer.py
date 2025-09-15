@@ -25,6 +25,7 @@ from .models import (
     VideoMetadata,
     ProcessingStatus
 )
+from .pose_3d_visualizer import Pose3DVisualizer
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,14 @@ class RTMPoseAnalyzer:
         # Thread pool for CPU-intensive operations
         self.thread_pool = ThreadPoolExecutor(max_workers=2)
         
-        logger.info(f"RTMPoseAnalyzer initialized - model: {model_name}, input_size: {input_size}, frame_skip: {frame_skip}")
+        # Initialize 3D visualizer for RTMPose3D mode
+        if self.use_3d:
+            self.pose_3d_visualizer = Pose3DVisualizer()
+            logger.info("🎭 3D pose visualizer initialized for side-by-side rendering")
+        else:
+            self.pose_3d_visualizer = None
+        
+        logger.info(f"RTMPoseAnalyzer initialized - model: {model_name}, input_size: {input_size}, frame_skip: {frame_skip}, 3D: {use_3d}")
     
     def _check_dependencies(self) -> bool:
         """Check if all RTMPose dependencies are installed."""
@@ -202,7 +210,7 @@ class RTMPoseAnalyzer:
             metadata = await self._extract_video_metadata(video_path, video_id)
             
             # Perform pose analysis with frame skipping
-            frame_analyses = await self._analyze_video_frames(video_path)
+            frame_analyses = await self._analyze_video_frames(video_path, video_id)
             
             # Calculate performance metrics
             processing_time = time.time() - start_time
@@ -251,7 +259,7 @@ class RTMPoseAnalyzer:
             format=Path(video_path).suffix[1:]  # Remove dot
         )
     
-    async def _analyze_video_frames(self, video_path: str) -> List[FrameAnalysis]:
+    async def _analyze_video_frames(self, video_path: str, video_id: Optional[str] = None) -> List[FrameAnalysis]:
         """Analyze video frames using RTMPose with frame skipping optimization."""
         try:
             from mmpose.apis import inference_topdown
@@ -303,6 +311,11 @@ class RTMPoseAnalyzer:
             frame_analyses = await self._fill_skipped_frames(frame_analyses, total_frames, fps)
         
         logger.info(f"RTMPose analysis complete - {len(frame_analyses)} frames processed")
+        
+        # Generate 3D visualizations if using RTMPose3D
+        if self.is_rtmpose3d and self.pose_3d_visualizer is not None:
+            await self._generate_3d_visualizations(frame_analyses, video_id)
+        
         return frame_analyses
     
     async def _analyze_single_frame(self, frame: np.ndarray, frame_idx: int, timestamp: float) -> FrameAnalysis:
@@ -360,12 +373,18 @@ class RTMPoseAnalyzer:
             # Calculate average confidence across all poses
             avg_confidence = total_confidence / poses_detected if poses_detected > 0 else 0.0
             
+            # Store raw RTMPose3D keypoints for 3D visualization (if using RTMPose3D)
+            raw_keypoints = None
+            if self.is_rtmpose3d and keypoints:
+                raw_keypoints = keypoints  # Store the original world coordinates
+            
             return FrameAnalysis(
                 frame_number=frame_idx,
                 timestamp_ms=timestamp * 1000,  # Convert to milliseconds
                 pose_detected=poses_detected > 0,  # Convert to boolean
                 landmarks=landmarks,
-                confidence_score=avg_confidence
+                confidence_score=avg_confidence,
+                raw_rtmpose_keypoints=raw_keypoints
             )
             
         except Exception as e:
@@ -446,42 +465,47 @@ class RTMPoseAnalyzer:
                 if len(keypoint) >= 2:
                     x, y = keypoint[0], keypoint[1]
                     
-                    # RTMPose3D coordinates are in world/camera space, need proper conversion
+                    # Handle coordinate conversion differently for 2D overlay vs 3D visualization
                     if self.is_rtmpose3d:
-                        # RTMPose3D keypoints_2d_overlay are in world coordinates
-                        # Need to convert to normalized image coordinates [0, 1]
-                        # Based on typical RTMPose3D coordinate ranges, use a scaling approach
+                        # For 3D visualization, preserve world coordinates
+                        # For 2D overlay, convert to normalized image coordinates
                         
-                        # RTMPose3D coordinate mapping to image space
-                        # Based on analysis: X: 1.653 to 2.827, Y: -1.330 to 0.251
-                        # Person appears to be center-left in the image
-                        
-                        # Center person in image (more robust for different videos)
-                        person_center_x = width * 0.5   # Center horizontally
-                        person_center_y = height * 0.55  # Slightly below center vertically
-                        
-                        # RTMPose3D coordinate ranges observed from testing
-                        rtm_x_range = 2.827 - 1.653  # ~1.17
-                        rtm_y_range = 0.251 - (-1.330)  # ~1.58
-                        rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
-                        rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
-                        
-                        # Increase scale to better match person size in frame
-                        person_scale_x = width * 0.25   # Person width ~25% of image (increased from 15%)
-                        person_scale_y = height * 0.6   # Person height ~60% of image (increased from 40%)  
-                        
-                        # Map RTMPose3D coordinates to image coordinates
-                        pixel_x = person_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
-                        pixel_y = person_center_y + ((y - rtm_y_center) / rtm_y_range) * person_scale_y  
-                        
-                        # Clamp to valid image bounds and normalize
-                        pixel_x = max(0, min(width-1, pixel_x))
-                        pixel_y = max(0, min(height-1, pixel_y))
-                        
-                        norm_x = pixel_x / width
-                        norm_y = pixel_y / height
-                        
-                        logger.debug(f"RTMPose3D coord conversion: world({x:.3f},{y:.3f}) -> pixel({pixel_x:.1f},{pixel_y:.1f}) -> norm({norm_x:.3f},{norm_y:.3f})")
+                        if hasattr(self, '_generating_3d_viz') and self._generating_3d_viz:
+                            # 3D Visualization: Use raw world coordinates directly
+                            norm_x = x  # Keep world X coordinate
+                            norm_y = y  # Keep world Y coordinate
+                            logger.debug(f"RTMPose3D 3D viz coords: world({x:.3f},{y:.3f}) -> preserved({norm_x:.3f},{norm_y:.3f})")
+                        else:
+                            # 2D Overlay: Convert world coordinates to image coordinates
+                            # RTMPose3D coordinate mapping to image space
+                            # Based on analysis: X: 1.653 to 2.827, Y: -1.330 to 0.251
+                            
+                            # Center person in image (more robust for different videos)
+                            person_center_x = width * 0.5   # Center horizontally
+                            person_center_y = height * 0.55  # Slightly below center vertically
+                            
+                            # RTMPose3D coordinate ranges observed from testing
+                            rtm_x_range = 2.827 - 1.653  # ~1.17
+                            rtm_y_range = 0.251 - (-1.330)  # ~1.58
+                            rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
+                            rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
+                            
+                            # Increase scale to better match person size in frame
+                            person_scale_x = width * 0.25   # Person width ~25% of image (increased from 15%)
+                            person_scale_y = height * 0.6   # Person height ~60% of image (increased from 40%)  
+                            
+                            # Map RTMPose3D coordinates to image coordinates
+                            pixel_x = person_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
+                            pixel_y = person_center_y + ((y - rtm_y_center) / rtm_y_range) * person_scale_y  
+                            
+                            # Clamp to valid image bounds and normalize
+                            pixel_x = max(0, min(width-1, pixel_x))
+                            pixel_y = max(0, min(height-1, pixel_y))
+                            
+                            norm_x = pixel_x / width
+                            norm_y = pixel_y / height
+                            
+                            logger.debug(f"RTMPose3D 2D overlay: world({x:.3f},{y:.3f}) -> pixel({pixel_x:.1f},{pixel_y:.1f}) -> norm({norm_x:.3f},{norm_y:.3f})")
                     else:
                         # Standard RTMPose coordinates - assume already in pixel space
                         norm_x = x / width if width > 0 else 0.0
@@ -1006,7 +1030,24 @@ class RTMPoseAnalyzer:
             frame_analysis: Frame analysis with pose landmarks
             
         Returns:
-            Frame with pose overlay drawn
+            Frame with 2D pose overlay drawn
+        """
+        if not frame_analysis.pose_detected or not frame_analysis.landmarks:
+            return frame
+            
+        # Always use 2D overlay for video - 3D visualization is handled separately
+        return self._draw_2d_pose_overlay(frame, frame_analysis)
+    
+    def _draw_2d_pose_overlay(self, frame: np.ndarray, frame_analysis: FrameAnalysis) -> np.ndarray:
+        """
+        Draw 2D pose overlay on frame (extracted from original _draw_rtmpose_overlay).
+        
+        Args:
+            frame: Input video frame
+            frame_analysis: Frame analysis with pose landmarks
+            
+        Returns:
+            Frame with 2D pose overlay drawn
         """
         if not frame_analysis.pose_detected or not frame_analysis.landmarks:
             return frame
@@ -1118,6 +1159,113 @@ class RTMPoseAnalyzer:
                        0.5, (255, 255, 255), 1)
         
         return frame
+    
+    async def _generate_3d_visualizations(self, frame_analyses: List[FrameAnalysis], video_id: str):
+        """Generate static 3D pose images for each frame with detected poses."""
+        if not self.pose_3d_visualizer:
+            logger.warning("3D visualizer not available - skipping 3D visualization generation")
+            return
+        
+        logger.info(f"Generating 3D visualizations for {len(frame_analyses)} frames...")
+        
+        # Create directory for 3D visualizations
+        import os
+        from pathlib import Path
+        
+        viz_dir = Path("uploads") / "3d_visualizations" / video_id
+        viz_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate 3D visualization for each frame with detected pose
+        generated_count = 0
+        for frame_analysis in frame_analyses:
+            if frame_analysis.pose_detected and frame_analysis.landmarks:
+                try:
+                    # For 3D visualization, we need world coordinates, not normalized ones
+                    # The existing landmarks have been converted to normalized [0,1] coordinates
+                    # for 2D overlay. For 3D visualization, we need the raw world coordinates.
+                    
+                    # Create 3D landmarks with preserved world coordinates 
+                    landmarks_3d = self._create_3d_landmarks_from_frame_analysis(frame_analysis)
+                    
+                    # Generate 3D pose visualization
+                    viz_path = viz_dir / f"frame_{frame_analysis.frame_number:06d}.png"
+                    viz_image = self.pose_3d_visualizer.create_3d_pose_frame(
+                        landmarks_3d if landmarks_3d else frame_analysis.landmarks,
+                        frame_idx=frame_analysis.frame_number,
+                        kpt_thr=0.1,  # Lower threshold to show more keypoints
+                        show_kpt_idx=False
+                    )
+                    
+                    # Save the image
+                    import cv2
+                    success = cv2.imwrite(str(viz_path), viz_image)
+                    
+                    if success:
+                        generated_count += 1
+                        logger.debug(f"Generated 3D visualization for frame {frame_analysis.frame_number}")
+                    else:
+                        logger.warning(f"Failed to generate 3D visualization for frame {frame_analysis.frame_number}")
+                    
+                except Exception as e:
+                    logger.warning(f"Error generating 3D visualization for frame {frame_analysis.frame_number}: {e}")
+        
+        logger.info(f"Generated {generated_count} 3D visualizations in {viz_dir}")
+    
+    def _create_3d_landmarks_from_frame_analysis(self, frame_analysis: FrameAnalysis) -> Optional[List[PoseLandmark]]:
+        """
+        Create 3D landmarks with preserved world coordinates for 3D visualization.
+        
+        This method retrieves the raw RTMPose3D world coordinates that were stored
+        during frame analysis, applying the same coordinate transformations as the
+        official RTMPose3D demo for proper 3D visualization.
+        
+        Args:
+            frame_analysis: Frame analysis containing original RTMPose3D data
+            
+        Returns:
+            List of PoseLandmark objects with world coordinates, or None if not available
+        """
+        if not self.is_rtmpose3d:
+            return None
+            
+        # Check if we have stored the raw RTMPose3D keypoints in the frame analysis
+        if not hasattr(frame_analysis, 'raw_rtmpose_keypoints') or not frame_analysis.raw_rtmpose_keypoints:
+            logger.debug(f"No raw RTMPose3D keypoints available for frame {frame_analysis.frame_number}")
+            return None
+            
+        try:
+            keypoints_3d = np.array(frame_analysis.raw_rtmpose_keypoints)
+            
+            # Apply the official RTMPose3D demo coordinate transformation
+            # From official demo: keypoints = -keypoints[..., [0, 2, 1]]
+            # This swaps Y and Z axes and negates all coordinates
+            transformed_keypoints = -keypoints_3d[:, [0, 2, 1]]
+            
+            # Apply height rebasing (ground contact)
+            # From official demo: keypoints[..., 2] -= np.min(keypoints[..., 2], axis=-1, keepdims=True)
+            if len(transformed_keypoints) > 0:
+                min_z = np.min(transformed_keypoints[:, 2])
+                transformed_keypoints[:, 2] -= min_z
+            
+            landmarks_3d = []
+            
+            # Convert each transformed RTMPose3D keypoint to PoseLandmark
+            for i, (x, y, z) in enumerate(transformed_keypoints):
+                landmark = PoseLandmark(
+                    x=float(x),      # Transformed X coordinate 
+                    y=float(y),      # Transformed Y coordinate (was Z)
+                    z=float(z),      # Transformed Z coordinate (was Y, rebased to ground)
+                    visibility=1.0   # Assume high visibility for RTMPose3D results
+                )
+                landmarks_3d.append(landmark)
+            
+            logger.debug(f"Created {len(landmarks_3d)} 3D landmarks with transformed coordinates for frame {frame_analysis.frame_number}")
+            logger.debug(f"Applied RTMPose3D coordinate transform: swap Y/Z, negate, rebase to ground")
+            return landmarks_3d
+            
+        except Exception as e:
+            logger.warning(f"Failed to create 3D landmarks from frame analysis: {e}")
+            return None
     
     def __del__(self):
         """Clean up resources."""

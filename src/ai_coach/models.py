@@ -78,6 +78,10 @@ class FrameAnalysis(BaseModel):
         ge=0, le=1, description="Overall pose detection confidence"
     )
     pose_detected: bool = Field(description="Whether a pose was detected in this frame")
+    raw_rtmpose_keypoints: Optional[List[List[float]]] = Field(
+        default=None, 
+        description="Raw RTMPose3D world coordinates for 3D visualization (x,y,z)"
+    )
     
     @field_validator("landmarks")
     @classmethod

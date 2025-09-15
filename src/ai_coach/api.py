@@ -523,6 +523,85 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
             logger.error(f"Cleanup error: {e}")
             raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
     
+    @app.get("/videos/{video_id}/3d-visualizations")
+    async def list_3d_visualizations(video_id: str):
+        """
+        List available 3D pose visualizations for a video.
+        
+        Args:
+            video_id: Unique video identifier
+            
+        Returns:
+            List of available 3D visualization frames
+        """
+        try:
+            viz_dir = Path(uploads_dir) / "3d_visualizations" / video_id
+            
+            if not viz_dir.exists():
+                return {"video_id": video_id, "frames": [], "count": 0}
+            
+            # Get all PNG files and extract frame numbers
+            frames = []
+            for png_file in viz_dir.glob("frame_*.png"):
+                # Extract frame number from filename like "frame_000123.png"
+                frame_num_str = png_file.stem.split("_")[-1]
+                try:
+                    frame_num = int(frame_num_str)
+                    frames.append({
+                        "frame_number": frame_num,
+                        "filename": png_file.name,
+                        "url": f"/videos/{video_id}/3d-visualizations/{frame_num}"
+                    })
+                except ValueError:
+                    continue
+            
+            # Sort by frame number
+            frames.sort(key=lambda x: x["frame_number"])
+            
+            return {
+                "video_id": video_id,
+                "frames": frames,
+                "count": len(frames)
+            }
+            
+        except Exception as e:
+            logger.error(f"💥 Error listing 3D visualizations for {video_id}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to list 3D visualizations")
+    
+    @app.get("/videos/{video_id}/3d-visualizations/{frame_number}")
+    async def get_3d_visualization(video_id: str, frame_number: int):
+        """
+        Get a specific 3D pose visualization frame.
+        
+        Args:
+            video_id: Unique video identifier
+            frame_number: Frame number to retrieve
+            
+        Returns:
+            PNG image response with 3D pose visualization
+        """
+        try:
+            viz_dir = Path(uploads_dir) / "3d_visualizations" / video_id
+            viz_file = viz_dir / f"frame_{frame_number:06d}.png"
+            
+            if not viz_file.exists():
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"3D visualization not found for frame {frame_number}"
+                )
+            
+            return FileResponse(
+                viz_file,
+                media_type="image/png",
+                filename=f"3d_pose_frame_{frame_number}.png"
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"💥 Error serving 3D visualization for {video_id}, frame {frame_number}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to serve 3D visualization")
+
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
