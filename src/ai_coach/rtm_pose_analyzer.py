@@ -1274,7 +1274,7 @@ class RTMPoseAnalyzer:
     
     def _calculate_global_bounds(self, frame_analyses: List[FrameAnalysis]) -> Optional[dict]:
         """
-        Calculate global min/max bounds for all keypoints across all frames.
+        Calculate global min/max bounds for all keypoints across all frames using GPU acceleration.
         
         Args:
             frame_analyses: List of frame analyses containing pose data
@@ -1283,43 +1283,75 @@ class RTMPoseAnalyzer:
             Dictionary with global bounds: {'x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max'}
             or None if no valid poses found
         """
-        x_coords = []
-        y_coords = []
-        z_coords = []
+        import time
+        start_time = time.time()
         
+        # Pre-allocate arrays for better performance
+        all_coords = []
+        visibility_threshold = 0.1
+        
+        # Batch collect coordinates for much faster processing
         for frame_analysis in frame_analyses:
             if frame_analysis.pose_detected and frame_analysis.landmarks:
                 # Get 3D landmarks (same transformation as used for visualization)
                 landmarks_3d = self._create_3d_landmarks_from_frame_analysis(frame_analysis)
                 
                 if landmarks_3d:
-                    # Collect all valid coordinates
+                    # Vectorized coordinate extraction
+                    frame_coords = []
                     for landmark in landmarks_3d:
-                        if landmark.visibility > 0.1:  # Same threshold as used in visualization
-                            x_coords.append(landmark.x)
-                            y_coords.append(landmark.y)
-                            z_coords.append(landmark.z)
+                        if landmark.visibility > visibility_threshold:
+                            frame_coords.append([landmark.x, landmark.y, landmark.z])
+                    if frame_coords:
+                        all_coords.extend(frame_coords)
                 else:
                     # Fallback to regular landmarks if 3D not available
+                    frame_coords = []
                     for landmark in frame_analysis.landmarks:
-                        if landmark.visibility > 0.1:
-                            x_coords.append(landmark.x)
-                            y_coords.append(landmark.y)
-                            z_coords.append(landmark.z)
+                        if landmark.visibility > visibility_threshold:
+                            frame_coords.append([landmark.x, landmark.y, landmark.z])
+                    if frame_coords:
+                        all_coords.extend(frame_coords)
         
-        if not x_coords:
+        if not all_coords:
             logger.warning("No valid coordinates found for global bounds calculation")
             return None
         
-        # Calculate global bounds using mean ± 3 * standard deviation (more robust than min/max)
-        x_coords = np.array(x_coords)
-        y_coords = np.array(y_coords)
-        z_coords = np.array(z_coords)
+        # Convert to numpy array for vectorized operations (much faster)
+        coords_array = np.array(all_coords, dtype=np.float32)  # Use float32 for better GPU performance
         
-        # Calculate mean and standard deviation for each axis
-        x_mean, x_std = np.mean(x_coords), np.std(x_coords)
-        y_mean, y_std = np.mean(y_coords), np.std(y_coords)
-        z_mean, z_std = np.mean(z_coords), np.std(z_coords)
+        # Try GPU acceleration if available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                # GPU-accelerated computation
+                device = torch.device('cuda')
+                coords_tensor = torch.from_numpy(coords_array).to(device)
+                
+                # Vectorized mean and std calculation on GPU
+                means = torch.mean(coords_tensor, dim=0)
+                stds = torch.std(coords_tensor, dim=0)
+                
+                # Move back to CPU
+                x_mean, y_mean, z_mean = means.cpu().numpy()
+                x_std, y_std, z_std = stds.cpu().numpy()
+                
+                logger.debug(f"Used GPU acceleration for bounds calculation")
+            else:
+                # Fallback to optimized CPU computation
+                means = np.mean(coords_array, axis=0)
+                stds = np.std(coords_array, axis=0)
+                x_mean, y_mean, z_mean = means
+                x_std, y_std, z_std = stds
+                logger.debug(f"Used CPU optimization for bounds calculation")
+                
+        except ImportError:
+            # Fallback to numpy if torch not available (still vectorized)
+            means = np.mean(coords_array, axis=0)
+            stds = np.std(coords_array, axis=0)
+            x_mean, y_mean, z_mean = means
+            x_std, y_std, z_std = stds
+            logger.debug(f"Used NumPy vectorized computation for bounds calculation")
         
         # Use mean ± 1.5 * std for bounds (tighter, more focused view while still robust)
         global_bounds = {
@@ -1331,7 +1363,8 @@ class RTMPoseAnalyzer:
             'z_max': float(z_mean + 1.5 * z_std)
         }
         
-        logger.debug(f"Calculated statistical global bounds (mean ± 1.5*std) from {len(x_coords)} valid coordinates")
+        elapsed_time = time.time() - start_time
+        logger.info(f"Calculated statistical global bounds (mean ± 1.5*std) from {len(all_coords)} coordinates in {elapsed_time:.3f}s")
         logger.debug(f"X: {x_mean:.2f} ± {x_std:.2f}, Y: {y_mean:.2f} ± {y_std:.2f}, Z: {z_mean:.2f} ± {z_std:.2f}")
         return global_bounds
     
