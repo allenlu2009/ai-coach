@@ -361,6 +361,9 @@ class AICoachApp {
         // Load processed video
         this.loadProcessedVideo(analysis.video_id);
         
+        // Check and enable 3D visualization if available
+        this.check3dVisualizationAvailability(analysis.video_id);
+        
         // Update progress to complete
         this.updateProgress({ 
             status: 'completed', 
@@ -879,6 +882,39 @@ class AICoachApp {
         if (slider) {
             slider.max = this.viz3dFrames.length - 1;
             slider.value = this.currentViz3dFrame;
+        }
+    }
+
+    // Check if 3D visualization is available and enable the tab
+    async check3dVisualizationAvailability(videoId) {
+        try {
+            const response = await fetch(`${this.API_BASE}/videos/${videoId}/3d-visualizations`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.frames && data.frames.length > 0) {
+                    // 3D poses are available - show the 3D tab
+                    this.enable3dTab();
+                    console.log(`3D visualization available with ${data.frames.length} frames`);
+                } else {
+                    console.log('3D visualization not available - no frames found');
+                }
+            } else {
+                console.log('3D visualization endpoint not available');
+            }
+        } catch (error) {
+            console.log('3D visualization check failed:', error);
+        }
+    }
+
+    // Enable the 3D Poses tab
+    enable3dTab() {
+        const tab3dBtn = document.querySelector('button[data-tab="3d-visualization"]');
+        if (tab3dBtn) {
+            tab3dBtn.classList.remove('hidden');
+            tab3dBtn.style.display = 'flex'; // Ensure it's visible
+            console.log('3D Poses tab enabled');
+        } else {
+            console.log('3D tab button not found');
         }
     }
 }
