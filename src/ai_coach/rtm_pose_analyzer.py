@@ -1175,6 +1175,10 @@ class RTMPoseAnalyzer:
         viz_dir = Path("uploads") / "3d_visualizations" / video_id
         viz_dir.mkdir(parents=True, exist_ok=True)
         
+        # Calculate global bounds for fixed axis scaling
+        global_bounds = self._calculate_global_bounds(frame_analyses)
+        logger.info(f"Global bounds calculated: {global_bounds}")
+        
         # Generate 3D visualization for each frame with detected pose
         generated_count = 0
         for frame_analysis in frame_analyses:
@@ -1193,7 +1197,8 @@ class RTMPoseAnalyzer:
                         landmarks_3d if landmarks_3d else frame_analysis.landmarks,
                         frame_idx=frame_analysis.frame_number,
                         kpt_thr=0.1,  # Lower threshold to show more keypoints
-                        show_kpt_idx=False
+                        show_kpt_idx=False,
+                        global_bounds=global_bounds
                     )
                     
                     # Save the image
@@ -1266,6 +1271,69 @@ class RTMPoseAnalyzer:
         except Exception as e:
             logger.warning(f"Failed to create 3D landmarks from frame analysis: {e}")
             return None
+    
+    def _calculate_global_bounds(self, frame_analyses: List[FrameAnalysis]) -> Optional[dict]:
+        """
+        Calculate global min/max bounds for all keypoints across all frames.
+        
+        Args:
+            frame_analyses: List of frame analyses containing pose data
+            
+        Returns:
+            Dictionary with global bounds: {'x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max'}
+            or None if no valid poses found
+        """
+        x_coords = []
+        y_coords = []
+        z_coords = []
+        
+        for frame_analysis in frame_analyses:
+            if frame_analysis.pose_detected and frame_analysis.landmarks:
+                # Get 3D landmarks (same transformation as used for visualization)
+                landmarks_3d = self._create_3d_landmarks_from_frame_analysis(frame_analysis)
+                
+                if landmarks_3d:
+                    # Collect all valid coordinates
+                    for landmark in landmarks_3d:
+                        if landmark.visibility > 0.1:  # Same threshold as used in visualization
+                            x_coords.append(landmark.x)
+                            y_coords.append(landmark.y)
+                            z_coords.append(landmark.z)
+                else:
+                    # Fallback to regular landmarks if 3D not available
+                    for landmark in frame_analysis.landmarks:
+                        if landmark.visibility > 0.1:
+                            x_coords.append(landmark.x)
+                            y_coords.append(landmark.y)
+                            z_coords.append(landmark.z)
+        
+        if not x_coords:
+            logger.warning("No valid coordinates found for global bounds calculation")
+            return None
+        
+        # Calculate global bounds using mean ± 3 * standard deviation (more robust than min/max)
+        x_coords = np.array(x_coords)
+        y_coords = np.array(y_coords)
+        z_coords = np.array(z_coords)
+        
+        # Calculate mean and standard deviation for each axis
+        x_mean, x_std = np.mean(x_coords), np.std(x_coords)
+        y_mean, y_std = np.mean(y_coords), np.std(y_coords)
+        z_mean, z_std = np.mean(z_coords), np.std(z_coords)
+        
+        # Use mean ± 1.5 * std for bounds (tighter, more focused view while still robust)
+        global_bounds = {
+            'x_min': float(x_mean - 1.5 * x_std),
+            'x_max': float(x_mean + 1.5 * x_std),
+            'y_min': float(y_mean - 1.5 * y_std),
+            'y_max': float(y_mean + 1.5 * y_std),
+            'z_min': float(z_mean - 1.5 * z_std),
+            'z_max': float(z_mean + 1.5 * z_std)
+        }
+        
+        logger.debug(f"Calculated statistical global bounds (mean ± 1.5*std) from {len(x_coords)} valid coordinates")
+        logger.debug(f"X: {x_mean:.2f} ± {x_std:.2f}, Y: {y_mean:.2f} ± {y_std:.2f}, Z: {z_mean:.2f} ± {z_std:.2f}")
+        return global_bounds
     
     def __del__(self):
         """Clean up resources."""

@@ -96,7 +96,8 @@ class Pose3DVisualizer:
                            landmarks: List[PoseLandmark], 
                            frame_idx: int = 0,
                            kpt_thr: float = 0.3,
-                           show_kpt_idx: bool = False) -> np.ndarray:
+                           show_kpt_idx: bool = False,
+                           global_bounds: dict = None) -> np.ndarray:
         """
         Create a 3D pose visualization frame from landmarks.
         
@@ -141,7 +142,7 @@ class Pose3DVisualizer:
             self._draw_3d_skeleton(ax, keypoints, scores, valid_mask, kpt_thr)
             
             # Configure 3D axes
-            self._configure_3d_axes(ax, keypoints[valid_mask])
+            self._configure_3d_axes(ax, keypoints[valid_mask], global_bounds)
             
             # Set title
             ax.set_title(f'3D Pose Estimation - Frame {frame_idx}', fontsize=12)
@@ -219,14 +220,35 @@ class Pose3DVisualizer:
                        [start_point[2], end_point[2]],
                        color=color, linewidth=3, alpha=0.8)
     
-    def _configure_3d_axes(self, ax, valid_keypoints: np.ndarray):
-        """Configure 3D axes limits and view angles with adaptive scaling."""
-        if len(valid_keypoints) == 0:
-            # Default axis configuration
+    def _configure_3d_axes(self, ax, valid_keypoints: np.ndarray, global_bounds: dict = None):
+        """Configure 3D axes limits and view angles with adaptive or fixed scaling."""
+        if global_bounds is not None:
+            # Use global bounds for fixed axis scaling across all frames
+            x_min, x_max = global_bounds['x_min'], global_bounds['x_max']
+            y_min, y_max = global_bounds['y_min'], global_bounds['y_max']
+            z_min, z_max = global_bounds['z_min'], global_bounds['z_max']
+            
+            # Add small padding (5%) to the statistical global bounds for better visualization
+            x_padding = (x_max - x_min) * 0.05
+            y_padding = (y_max - y_min) * 0.05
+            z_padding = (z_max - z_min) * 0.05
+            
+            # Set fixed axis limits based on global bounds
+            ax.set_xlim([x_min - x_padding, x_max + x_padding])
+            ax.set_ylim([y_min - y_padding, y_max + y_padding])
+            
+            # For Z axis, ensure ground level (0) is included if needed
+            z_lower = min(z_min - z_padding, 0)
+            z_upper = max(z_max + z_padding, z_lower + (z_max - z_min + 2*z_padding))
+            ax.set_zlim([z_lower, z_upper])
+            
+        elif len(valid_keypoints) == 0:
+            # Default axis configuration when no keypoints and no global bounds
             ax.set_xlim([-self.axis_limit, self.axis_limit])
             ax.set_ylim([-self.axis_limit, self.axis_limit])
             ax.set_zlim([0, self.axis_limit])
         else:
+            # Fallback to adaptive scaling for individual frames (original behavior)
             # Calculate pose dimensions for adaptive scaling
             x_range = np.max(valid_keypoints[:, 0]) - np.min(valid_keypoints[:, 0])
             y_range = np.max(valid_keypoints[:, 1]) - np.min(valid_keypoints[:, 1])
