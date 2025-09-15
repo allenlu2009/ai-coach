@@ -918,9 +918,13 @@ class AICoachApp {
         // Find the video controls area
         const videoControls = document.querySelector('.video-controls');
         if (videoControls) {
+            // Remove any existing 3D visualization buttons to prevent duplicates
+            const existingButtons = videoControls.querySelectorAll('.viz3d-btn');
+            existingButtons.forEach(btn => btn.remove());
+            
             // Create the 3D visualization button
             const button3d = document.createElement('button');
-            button3d.className = 'control-btn';
+            button3d.className = 'control-btn viz3d-btn';
             button3d.innerHTML = `
                 <i class="fas fa-cube"></i>
                 Open 3D Visualization (${frameCount} frames)

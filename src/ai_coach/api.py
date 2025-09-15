@@ -200,6 +200,15 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
                 "status": "running",
                 "note": "Frontend files not found"
             }
+    
+    @app.get("/3d-viewer/{video_id}")
+    async def serve_3d_viewer(video_id: str):
+        """Serve 3D viewer HTML page for a specific video."""
+        viewer_file = Path(__file__).parent.parent / "frontend" / "static" / "3d-viewer.html"
+        if viewer_file.exists():
+            return FileResponse(str(viewer_file))
+        else:
+            raise HTTPException(status_code=404, detail="3D viewer not available")
             
     @app.get("/api")
     async def api_info():

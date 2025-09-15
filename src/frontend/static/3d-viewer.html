@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Pose Visualization - AI Coach</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+            font-family: 'Inter', sans-serif;
+        }
+        .viewer-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .viewer-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .viewer-header h1 {
+            color: #00d4ff;
+            margin: 0 0 10px 0;
+        }
+        .viewer-header p {
+            color: #888;
+            margin: 0;
+        }
+        .viewer-content {
+            background: #0f0f23;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .viewer-image {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            border-radius: 8px;
+            display: block;
+            margin: 0 auto 20px auto;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+        .viewer-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .control-btn {
+            background: #00d4ff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-btn:hover {
+            background: #0099cc;
+            transform: translateY(-2px);
+        }
+        .control-btn:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .frame-info {
+            color: #00d4ff;
+            font-weight: 500;
+            padding: 10px 15px;
+            background: #16213e;
+            border-radius: 5px;
+        }
+        .viewer-slider {
+            width: 100%;
+            max-width: 600px;
+            height: 6px;
+            border-radius: 3px;
+            background: #333;
+            outline: none;
+            margin: 0 auto;
+            display: block;
+        }
+        .viewer-slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 212, 255, 0.3);
+        }
+        .viewer-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 212, 255, 0.3);
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+        .loading i {
+            font-size: 48px;
+            color: #00d4ff;
+            margin-bottom: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #ff6b6b;
+        }
+        .error i {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="viewer-container">
+        <div class="viewer-header">
+            <h1><i class="fas fa-cube"></i> 3D Pose Visualization</h1>
+            <p id="videoInfo">Loading 3D pose visualization...</p>
+        </div>
+        
+        <div class="viewer-content">
+            <div id="loadingState" class="loading">
+                <i class="fas fa-spinner"></i>
+                <h3>Loading 3D Visualization...</h3>
+                <p>Please wait while we load the 3D pose frames</p>
+            </div>
+            
+            <div id="errorState" class="error" style="display: none;">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>Unable to Load 3D Visualization</h3>
+                <p>The 3D pose visualization could not be loaded. Please try again.</p>
+            </div>
+            
+            <div id="viewerState" style="display: none;">
+                <img id="poseImage" class="viewer-image" alt="3D Pose Visualization">
+                
+                <div class="viewer-controls">
+                    <button id="prevBtn" class="control-btn">
+                        <i class="fas fa-chevron-left"></i>
+                        Previous
+                    </button>
+                    <button id="playBtn" class="control-btn">
+                        <i class="fas fa-play"></i>
+                        Play
+                    </button>
+                    <button id="nextBtn" class="control-btn">
+                        <i class="fas fa-chevron-right"></i>
+                        Next
+                    </button>
+                    <span id="frameInfo" class="frame-info">Frame 1 of 100</span>
+                </div>
+                
+                <input type="range" id="frameSlider" class="viewer-slider" min="0" max="100" value="0">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class Viewer3D {
+            constructor() {
+                this.frames = [];
+                this.currentFrame = 0;
+                this.isPlaying = false;
+                this.playInterval = null;
+                this.videoId = this.getVideoIdFromUrl();
+                
+                this.init();
+            }
+            
+            getVideoIdFromUrl() {
+                const pathParts = window.location.pathname.split('/');
+                return pathParts[pathParts.length - 1];
+            }
+            
+            async init() {
+                try {
+                    await this.loadFrames();
+                    this.setupControls();
+                    this.showViewer();
+                } catch (error) {
+                    this.showError();
+                }
+            }
+            
+            async loadFrames() {
+                const response = await fetch(`/videos/${this.videoId}/3d-visualizations`);
+                if (!response.ok) {
+                    throw new Error('Failed to load 3D frames');
+                }
+                
+                const data = await response.json();
+                this.frames = data.frames;
+                
+                if (!this.frames || this.frames.length === 0) {
+                    throw new Error('No 3D frames available');
+                }
+                
+                document.getElementById('videoInfo').textContent = 
+                    `3D Pose Animation - ${this.frames.length} frames`;
+            }
+            
+            setupControls() {
+                const prevBtn = document.getElementById('prevBtn');
+                const nextBtn = document.getElementById('nextBtn');
+                const playBtn = document.getElementById('playBtn');
+                const frameSlider = document.getElementById('frameSlider');
+                
+                prevBtn.addEventListener('click', () => this.previousFrame());
+                nextBtn.addEventListener('click', () => this.nextFrame());
+                playBtn.addEventListener('click', () => this.togglePlay());
+                frameSlider.addEventListener('input', (e) => this.goToFrame(parseInt(e.target.value)));
+                
+                frameSlider.max = this.frames.length - 1;
+                this.updateFrame();
+            }
+            
+            showViewer() {
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('viewerState').style.display = 'block';
+            }
+            
+            showError() {
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('errorState').style.display = 'block';
+            }
+            
+            updateFrame() {
+                if (this.frames.length === 0) return;
+                
+                const frame = this.frames[this.currentFrame];
+                const poseImage = document.getElementById('poseImage');
+                const frameInfo = document.getElementById('frameInfo');
+                const frameSlider = document.getElementById('frameSlider');
+                
+                poseImage.src = frame.url;
+                frameInfo.textContent = `Frame ${this.currentFrame + 1} of ${this.frames.length}`;
+                frameSlider.value = this.currentFrame;
+            }
+            
+            previousFrame() {
+                if (this.currentFrame > 0) {
+                    this.currentFrame--;
+                    this.updateFrame();
+                }
+            }
+            
+            nextFrame() {
+                if (this.currentFrame < this.frames.length - 1) {
+                    this.currentFrame++;
+                    this.updateFrame();
+                }
+            }
+            
+            goToFrame(frameIndex) {
+                if (frameIndex >= 0 && frameIndex < this.frames.length) {
+                    this.currentFrame = frameIndex;
+                    this.updateFrame();
+                }
+            }
+            
+            togglePlay() {
+                const playBtn = document.getElementById('playBtn');
+                
+                if (this.isPlaying) {
+                    this.stopPlay();
+                    playBtn.innerHTML = '<i class="fas fa-play"></i> Play';
+                } else {
+                    this.startPlay();
+                    playBtn.innerHTML = '<i class="fas fa-pause"></i> Pause';
+                }
+            }
+            
+            startPlay() {
+                this.isPlaying = true;
+                this.playInterval = setInterval(() => {
+                    this.nextFrame();
+                    
+                    // Loop back to start when reaching the end
+                    if (this.currentFrame >= this.frames.length - 1) {
+                        this.currentFrame = 0;
+                        this.updateFrame();
+                    }
+                }, 100); // 10 FPS playback
+            }
+            
+            stopPlay() {
+                this.isPlaying = false;
+                if (this.playInterval) {
+                    clearInterval(this.playInterval);
+                    this.playInterval = null;
+                }
+            }
+        }
+        
+        // Initialize the 3D viewer when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            new Viewer3D();
+        });
+    </script>
+</body>
+</html>
