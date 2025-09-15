@@ -897,9 +897,9 @@ class AICoachApp {
                 const data = await response.json();
                 console.log(`🔍 Response data:`, data);
                 if (data.frames && data.frames.length > 0) {
-                    // 3D poses are available - show the 3D tab
-                    console.log(`✅ 3D visualization available with ${data.frames.length} frames - enabling tab`);
-                    this.enable3dTab();
+                    // 3D poses are available - show "Open 3D Visualization" button
+                    console.log(`✅ 3D visualization available with ${data.frames.length} frames - showing button`);
+                    this.show3dVisualizationButton(videoId, data.frames.length);
                 } else {
                     console.log('❌ 3D visualization not available - no frames found');
                 }
@@ -911,22 +911,41 @@ class AICoachApp {
         }
     }
 
-    // Enable the 3D Poses tab
-    enable3dTab() {
-        console.log('🎯 Attempting to enable 3D Poses tab...');
-        const tab3dBtn = document.querySelector('button[data-tab="3d-visualization"]');
-        console.log('🎯 Tab button element:', tab3dBtn);
-        if (tab3dBtn) {
-            console.log('🎯 Tab button classes before:', tab3dBtn.className);
-            console.log('🎯 Tab button style.display before:', tab3dBtn.style.display);
-            tab3dBtn.classList.remove('hidden');
-            tab3dBtn.style.display = 'flex'; // Ensure it's visible
-            console.log('🎯 Tab button classes after:', tab3dBtn.className);
-            console.log('🎯 Tab button style.display after:', tab3dBtn.style.display);
-            console.log('✅ 3D Poses tab enabled successfully');
+    // Show "Open 3D Visualization" button
+    show3dVisualizationButton(videoId, frameCount) {
+        console.log('🎯 Showing 3D visualization button...');
+        
+        // Find the video controls area
+        const videoControls = document.querySelector('.video-controls');
+        if (videoControls) {
+            // Create the 3D visualization button
+            const button3d = document.createElement('button');
+            button3d.className = 'control-btn';
+            button3d.innerHTML = `
+                <i class="fas fa-cube"></i>
+                Open 3D Visualization (${frameCount} frames)
+            `;
+            button3d.style.marginLeft = '10px';
+            
+            // Add click handler to open new window
+            button3d.addEventListener('click', () => {
+                this.open3dVisualizationWindow(videoId);
+            });
+            
+            // Add the button to controls
+            videoControls.appendChild(button3d);
+            console.log(`✅ 3D visualization button added with ${frameCount} frames`);
         } else {
-            console.log('❌ 3D tab button not found in DOM');
+            console.log('❌ Video controls area not found');
         }
+    }
+
+    // Open 3D visualization in new window
+    open3dVisualizationWindow(videoId) {
+        const url = `${window.location.origin}/3d-viewer/${videoId}`;
+        const windowFeatures = 'width=1200,height=800,scrollbars=yes,resizable=yes';
+        window.open(url, '_blank', windowFeatures);
+        console.log(`🚀 Opened 3D visualization window for video: ${videoId}`);
     }
 }
 
