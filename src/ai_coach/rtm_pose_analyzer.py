@@ -46,7 +46,8 @@ class RTMPoseAnalyzer:
                  frame_skip: int = 3,
                  model_name: str = "rtmpose-m",
                  input_size: Tuple[int, int] = (256, 192),
-                 use_3d: bool = False):
+                 use_3d: bool = False,
+                 enable_detection: bool = True):
         """
         Initialize RTMPose analyzer with GPU optimization.
         
@@ -56,12 +57,14 @@ class RTMPoseAnalyzer:
             model_name: RTMPose model variant (tiny/small/medium/large)
             input_size: Model input resolution (width, height)
             use_3d: Enable 3D pose estimation (default: False for 2D)
+            enable_detection: Enable person detection for better 2D overlay (default: True)
         """
         self.use_gpu_encoding = use_gpu_encoding
         self.frame_skip = frame_skip
         self.model_name = model_name
         self.input_size = input_size
         self.use_3d = use_3d
+        self.enable_detection = enable_detection
         
         # Performance tracking
         self.total_frames_processed = 0
@@ -70,6 +73,7 @@ class RTMPoseAnalyzer:
         
         # Model will be initialized when dependencies are ready
         self.model = None
+        self.detector = None  # MMDetection model for person detection
         self.model_initialized = False
         self.is_rtmpose3d = False  # Track if using real RTMPose3D model
         
@@ -166,6 +170,54 @@ class RTMPoseAnalyzer:
                 self.inferencer = MMPoseInferencer('human', device=device)
                 self.is_rtmpose3d = False
                 logger.info("📊 2D pose detection mode")
+            
+            # Initialize MMDetection for person detection if enabled
+            if self.enable_detection:
+                try:
+                    from mmdet.apis import init_detector
+                    from mmpose.utils import adapt_mmdet_pipeline
+                    
+                    # Use local MMDetection config from provided codebase
+                    logger.info("🔍 Initializing MMDetection for person detection...")
+                    
+                    # Use the provided mmdetection codebase config file
+                    det_config = '/mnt/c/Users/allen/我的雲端硬碟/claude_code/ai_coach/examples/mmdetection/configs/yolox/yolox_s_8xb8-300e_coco.py'
+                    checkpoint_url = 'https://download.openmmlab.com/mmdetection/v2.0/yolox/yolox_s_8x8_300e_coco/yolox_s_8x8_300e_coco_20211121_095711-4592a793.pth'
+                    
+                    try:
+                        logger.info(f"📥 Loading YOLOX-S config: {det_config}")
+                        logger.info(f"📥 Loading checkpoint: {checkpoint_url}")
+                        self.detector = init_detector(det_config, checkpoint_url, device=device)
+                        logger.info("✅ Local YOLOX config loaded successfully")
+                        
+                    except Exception as local_error:
+                        logger.warning(f"⚠️ Failed to load local YOLOX config: {local_error}")
+                        try:
+                            # Fallback to model registry approach if local config fails
+                            logger.info("🔄 Falling back to model registry...")
+                            model_config = 'yolox_s_8x8_300e_coco'
+                            self.detector = init_detector(model_config, checkpoint_url, device=device)
+                            logger.info("✅ Model registry fallback successful")
+                            
+                        except Exception as registry_error:
+                            logger.warning(f"Model registry failed: {registry_error}")
+                            # Final fallback to RTMDet
+                            try:
+                                logger.info("🔄 Final fallback to RTMDet...")
+                                model_config = 'rtmdet_tiny_8x32_300e_coco'
+                                checkpoint_url = 'https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_tiny_8x32_300e_coco/rtmdet_tiny_8x32_300e_coco_20220902_112414-78e30dcc.pth'
+                                self.detector = init_detector(model_config, checkpoint_url, device=device)
+                                logger.info("✅ RTMDet fallback successful")
+                                
+                            except Exception as rtmdet_error:
+                                logger.error(f"All MMDetection initialization attempts failed: {rtmdet_error}")
+                                raise Exception("All detection model initialization attempts failed")
+                    self.detector.cfg = adapt_mmdet_pipeline(self.detector.cfg)
+                    logger.info("✅ MMDetection initialized successfully")
+                except Exception as det_error:
+                    logger.warning(f"MMDetection initialization failed: {det_error}")
+                    logger.info("🔄 Using full-frame detection fallback")
+                    self.detector = None
             
             self.model_initialized = True
             logger.info(f"✅ RTMPose model initialized successfully")
@@ -359,10 +411,12 @@ class RTMPoseAnalyzer:
                                     keypoints = primary_pose['keypoints']  # Standard coordinates
                                     
                                 keypoint_scores = primary_pose.get('keypoint_scores', [])
+                                detected_bbox = primary_pose.get('detected_bbox', None)  # Get detection bbox if available
                                 
                                 # Convert to our PoseLandmark format (always returns exactly 33 landmarks)
+                                # Pass detected bbox for improved 2D overlay positioning
                                 landmarks = self._convert_rtmpose_keypoints(
-                                    keypoints, keypoint_scores, frame.shape[:2]
+                                    keypoints, keypoint_scores, frame.shape[:2], detected_bbox
                                 )
                                 
                                 # Average confidence from keypoint scores
@@ -397,7 +451,7 @@ class RTMPoseAnalyzer:
                 confidence_score=0.0
             )
     
-    def _convert_rtmpose_keypoints(self, keypoints: List[List[float]], keypoint_scores: List[float], frame_shape: Tuple[int, int]) -> List[PoseLandmark]:
+    def _convert_rtmpose_keypoints(self, keypoints: List[List[float]], keypoint_scores: List[float], frame_shape: Tuple[int, int], detected_bbox: Optional[np.ndarray] = None) -> List[PoseLandmark]:
         """Convert RTMPose keypoints to PoseLandmark format compatible with MediaPipe.
         
         RTMPose provides 17 keypoints in COCO format, but MediaPipe expects 33.
@@ -477,26 +531,53 @@ class RTMPoseAnalyzer:
                             logger.debug(f"RTMPose3D 3D viz coords: world({x:.3f},{y:.3f}) -> preserved({norm_x:.3f},{norm_y:.3f})")
                         else:
                             # 2D Overlay: Convert world coordinates to image coordinates
-                            # RTMPose3D coordinate mapping to image space
-                            # Based on analysis: X: 1.653 to 2.827, Y: -1.330 to 0.251
+                            # Enhanced with detection-based positioning
                             
-                            # Center person in image (more robust for different videos)
-                            person_center_x = width * 0.5   # Center horizontally
-                            person_center_y = height * 0.55  # Slightly below center vertically
-                            
-                            # RTMPose3D coordinate ranges observed from testing
-                            rtm_x_range = 2.827 - 1.653  # ~1.17
-                            rtm_y_range = 0.251 - (-1.330)  # ~1.58
-                            rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
-                            rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
-                            
-                            # Increase scale to better match person size in frame
-                            person_scale_x = width * 0.25   # Person width ~25% of image (increased from 15%)
-                            person_scale_y = height * 0.6   # Person height ~60% of image (increased from 40%)  
-                            
-                            # Map RTMPose3D coordinates to image coordinates
-                            pixel_x = person_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
-                            pixel_y = person_center_y + ((y - rtm_y_center) / rtm_y_range) * person_scale_y  
+                            if detected_bbox is not None and len(detected_bbox) == 4:
+                                # Use detected bounding box for accurate positioning
+                                bbox_x1, bbox_y1, bbox_x2, bbox_y2 = detected_bbox
+                                bbox_center_x = (bbox_x1 + bbox_x2) / 2
+                                bbox_center_y = (bbox_y1 + bbox_y2) / 2
+                                bbox_width = bbox_x2 - bbox_x1
+                                bbox_height = bbox_y2 - bbox_y1
+                                
+                                # Use bbox-relative coordinates with RTMPose3D world coordinates
+                                rtm_x_range = 2.827 - 1.653  # ~1.17
+                                rtm_y_range = 0.251 - (-1.330)  # ~1.58
+                                rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
+                                rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
+                                
+                                # Map to bbox coordinate system
+                                # Use 80% of bbox size to avoid edge clipping
+                                person_scale_x = bbox_width * 0.8
+                                person_scale_y = bbox_height * 0.8
+                                
+                                # Map RTMPose3D coordinates to bbox-relative pixel coordinates
+                                pixel_x = bbox_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
+                                pixel_y = bbox_center_y + ((y - rtm_y_center) / rtm_y_range) * person_scale_y
+                                
+                                logger.debug(f"RTMPose3D with detection: world({x:.3f},{y:.3f}) -> bbox({bbox_center_x:.1f},{bbox_center_y:.1f}) -> pixel({pixel_x:.1f},{pixel_y:.1f})")
+                                
+                            else:
+                                # Fallback to fixed image-relative positioning
+                                person_center_x = width * 0.5   # Center horizontally
+                                person_center_y = height * 0.55  # Slightly below center vertically
+                                
+                                # RTMPose3D coordinate ranges observed from testing
+                                rtm_x_range = 2.827 - 1.653  # ~1.17
+                                rtm_y_range = 0.251 - (-1.330)  # ~1.58
+                                rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
+                                rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
+                                
+                                # Use moderate scaling for fallback
+                                person_scale_x = width * 0.25   # Person width ~25% of image
+                                person_scale_y = height * 0.6   # Person height ~60% of image
+                                
+                                # Map RTMPose3D coordinates to image coordinates
+                                pixel_x = person_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
+                                pixel_y = person_center_y + ((y - rtm_y_center) / rtm_y_range) * person_scale_y  
+                                
+                                logger.debug(f"RTMPose3D fallback: world({x:.3f},{y:.3f}) -> pixel({pixel_x:.1f},{pixel_y:.1f})")
                             
                             # Clamp to valid image bounds and normalize
                             pixel_x = max(0, min(width-1, pixel_x))
@@ -504,8 +585,6 @@ class RTMPoseAnalyzer:
                             
                             norm_x = pixel_x / width
                             norm_y = pixel_y / height
-                            
-                            logger.debug(f"RTMPose3D 2D overlay: world({x:.3f},{y:.3f}) -> pixel({pixel_x:.1f},{pixel_y:.1f}) -> norm({norm_x:.3f},{norm_y:.3f})")
                     else:
                         # Standard RTMPose coordinates - assume already in pixel space
                         norm_x = x / width if width > 0 else 0.0
@@ -625,16 +704,68 @@ class RTMPoseAnalyzer:
         # Clamp to reasonable depth range for coaching analysis
         return max(-50.0, min(50.0, final_depth))
     
+    def _detect_persons(self, frame: np.ndarray, bbox_thr: float = 0.5, det_cat_id: int = 0) -> np.ndarray:
+        """
+        Detect persons in frame using MMDetection (following official RTMPose3D demo approach).
+        
+        Args:
+            frame: Input frame
+            bbox_thr: Bounding box confidence threshold
+            det_cat_id: Detection category ID (0 for person in COCO)
+            
+        Returns:
+            Array of bounding boxes in format [[x1, y1, x2, y2], ...]
+        """
+        try:
+            from mmdet.apis import inference_detector
+            
+            # Run person detection
+            det_result = inference_detector(self.detector, frame)
+            pred_instance = det_result.pred_instances.cpu().numpy()
+            
+            # Filter out the person instances with category and bbox threshold
+            # Following official demo: lines 197-200
+            bboxes = pred_instance.bboxes
+            bboxes = bboxes[np.logical_and(pred_instance.labels == det_cat_id,
+                                           pred_instance.scores > bbox_thr)]
+            
+            # Log detection results for debugging
+            if len(bboxes) > 0:
+                logger.debug(f"Detected {len(bboxes)} person(s) with confidence > {bbox_thr}")
+                # Take only the highest confidence detection for single-person use case
+                if len(bboxes) > 1:
+                    # Sort by confidence (scores are in same order as bboxes)
+                    valid_scores = pred_instance.scores[np.logical_and(pred_instance.labels == det_cat_id,
+                                                                      pred_instance.scores > bbox_thr)]
+                    best_idx = np.argmax(valid_scores)
+                    bboxes = bboxes[best_idx:best_idx+1]  # Keep only best detection
+                    logger.debug(f"Selected best detection with confidence {valid_scores[best_idx]:.3f}")
+            
+            return bboxes.astype(np.float32)
+            
+        except Exception as e:
+            logger.error(f"Person detection failed: {e}")
+            return np.array([], dtype=np.float32).reshape(0, 4)
+    
     def _run_rtmpose3d_inference(self, frame: np.ndarray):
-        """Run RTMPose3D inference for native 3D pose estimation."""
+        """Run RTMPose3D inference for native 3D pose estimation with optional detection."""
         try:
             from mmpose.apis import inference_topdown
             import numpy as np
             
-            # Create a full-frame bounding box as numpy array (required format)
-            height, width = frame.shape[:2]
-            # RTMPose3D expects bboxes in format: [[x1, y1, x2, y2], ...] (no score)
-            bboxes = np.array([[0, 0, width, height]], dtype=np.float32)
+            # Use detection if available, otherwise fall back to full-frame
+            if self.detector is not None and self.enable_detection:
+                bboxes = self._detect_persons(frame)
+                if len(bboxes) == 0:
+                    # No persons detected, use full frame as fallback
+                    height, width = frame.shape[:2]
+                    bboxes = np.array([[0, 0, width, height]], dtype=np.float32)
+                    logger.debug("No persons detected, using full-frame fallback")
+            else:
+                # Create a full-frame bounding box as numpy array (required format)
+                height, width = frame.shape[:2]
+                # RTMPose3D expects bboxes in format: [[x1, y1, x2, y2], ...] (no score)
+                bboxes = np.array([[0, 0, width, height]], dtype=np.float32)
             
             # Run 3D pose estimation  
             pose_results = inference_topdown(self.pose3d_model, frame, bboxes)
@@ -688,11 +819,13 @@ class RTMPoseAnalyzer:
                             
                             # Format as expected by downstream processing
                             # Include both original (for 2D overlay) and transformed (for 3D analysis) coordinates
+                            # Also include the detected bounding box for improved 2D overlay
                             formatted_result = {
                                 'predictions': [[{
                                     'keypoints': person_keypoints.tolist(),  # 3D transformed coordinates
                                     'keypoints_2d_overlay': original_person_keypoints.tolist(),  # Original pixel coordinates for overlay
-                                    'keypoint_scores': person_scores.tolist() if hasattr(person_scores, 'tolist') else list(person_scores)
+                                    'keypoint_scores': person_scores.tolist() if hasattr(person_scores, 'tolist') else list(person_scores),
+                                    'detected_bbox': bboxes[0].tolist() if len(bboxes) > 0 else None  # Store first detected bbox
                                 }]]
                             }
                             formatted_results.append(formatted_result)
