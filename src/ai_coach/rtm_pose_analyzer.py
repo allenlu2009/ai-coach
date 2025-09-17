@@ -1202,16 +1202,42 @@ class RTMPoseAnalyzer:
         # Draw pose landmarks and connections
         height, width = frame.shape[:2]
         
-        # Convert landmarks to pixel coordinates with 3D depth info
+        # Convert landmarks to pixel coordinates with bbox-based transformation
         pose_points = []
         pose_depths = []
-        for landmark in frame_analysis.landmarks:
-            # RTMPose landmarks are in image coordinates (pixels)
-            x = int(landmark.x * width) if landmark.x <= 1.0 else int(landmark.x)
-            y = int(landmark.y * height) if landmark.y <= 1.0 else int(landmark.y)
-            z = landmark.z  # Keep original 3D depth coordinate
-            pose_points.append((x, y))
-            pose_depths.append(z)
+        
+        # Check if we have bounding box information for accurate transformation
+        if (frame_analysis.detected_bbox is not None and 
+            len(frame_analysis.detected_bbox) == 4):
+            # Use bounding box for coordinate transformation
+            bbox = frame_analysis.detected_bbox
+            bbox_x1, bbox_y1, bbox_x2, bbox_y2 = bbox
+            bbox_width = bbox_x2 - bbox_x1
+            bbox_height = bbox_y2 - bbox_y1
+            
+            for landmark in frame_analysis.landmarks:
+                # RTMPose landmarks are relative to the cropped bbox region
+                # Transform from crop coordinates to full image coordinates
+                if landmark.x <= 1.0 and landmark.y <= 1.0:
+                    # Normalized coordinates (0-1) relative to bbox
+                    x = int(bbox_x1 + landmark.x * bbox_width)
+                    y = int(bbox_y1 + landmark.y * bbox_height)
+                else:
+                    # Already in bbox pixel coordinates, transform to full image
+                    x = int(bbox_x1 + landmark.x)
+                    y = int(bbox_y1 + landmark.y)
+                
+                z = landmark.z  # Keep original 3D depth coordinate
+                pose_points.append((x, y))
+                pose_depths.append(z)
+        else:
+            # Fallback to simple coordinate conversion (original method)
+            for landmark in frame_analysis.landmarks:
+                x = int(landmark.x * width) if landmark.x <= 1.0 else int(landmark.x)
+                y = int(landmark.y * height) if landmark.y <= 1.0 else int(landmark.y)
+                z = landmark.z  # Keep original 3D depth coordinate
+                pose_points.append((x, y))
+                pose_depths.append(z)
         
         # Draw pose connections using MediaPipe landmark indices
         # (RTMPose keypoints are converted to MediaPipe format in _convert_rtmpose_keypoints)
