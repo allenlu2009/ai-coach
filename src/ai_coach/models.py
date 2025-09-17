@@ -82,6 +82,10 @@ class FrameAnalysis(BaseModel):
         default=None, 
         description="Raw RTMPose3D world coordinates for 3D visualization (x,y,z)"
     )
+    detected_bbox: Optional[List[float]] = Field(
+        default=None,
+        description="MMDetection bounding box [x1, y1, x2, y2] for debugging visualization"
+    )
     
     @field_validator("landmarks")
     @classmethod

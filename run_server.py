@@ -98,6 +98,8 @@ def main():
 						   help='Analyze every Nth frame for speedup (default: 3 for 3x faster analysis)')
 		parser.add_argument('--use-3d', action='store_true',
 						   help='Enable 3D pose estimation (default: 2D pose detection)')
+		parser.add_argument('--show-bbox', action='store_true',
+						   help='Enable bounding box debugging visualization (shows detection boxes)')
 		parser.add_argument('--host', default='127.0.0.1', 
 						   help='Host to bind the server to (default: 127.0.0.1)')
 		parser.add_argument('--port', type=int, default=8000,
@@ -116,6 +118,12 @@ def main():
 			os.environ['USE_3D_POSE'] = 'true'
 		else:
 			os.environ['USE_3D_POSE'] = 'false'
+			
+		# Set bounding box debugging environment variable
+		if args.show_bbox:
+			os.environ['SHOW_DETECTION_BBOX'] = 'true'
+		else:
+			os.environ['SHOW_DETECTION_BBOX'] = 'false'
 
 		# Ensure uploads directory exists (use project-local uploads folder)
 		uploads_dir = Path(__file__).parent / "uploads"
@@ -126,6 +134,7 @@ def main():
 		print(f"🌐 MEDIAPIPE_DISABLE_GPU={os.getenv('MEDIAPIPE_DISABLE_GPU')}")
 		print(f"🔧 OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS={os.getenv('OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS')}")
 		print(f"🔮 USE_3D_POSE={os.getenv('USE_3D_POSE')}")
+		print(f"📦 SHOW_DETECTION_BBOX={os.getenv('SHOW_DETECTION_BBOX')}")
 
 		# Start background watcher to help diagnose final video files produced at runtime
 		watcher = threading.Thread(target=_watch_uploads_dir, args=(uploads_dir,), daemon=True)
@@ -150,6 +159,11 @@ def main():
 			print("🔮 3D pose estimation enabled - generating X,Y,Z coordinates")
 		else:
 			print("📊 2D pose detection mode (default) - use --use-3d for 3D coordinates")
+			
+		if args.show_bbox:
+			print("📦 Bounding box debugging enabled - detection boxes will be visible")
+		else:
+			print("🔍 Bounding box debugging disabled - use --show-bbox to enable detection visualization")
 
 		# Import the app creation function and pass all optimization parameters
 		from ai_coach.api import create_app

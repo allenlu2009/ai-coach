@@ -47,7 +47,8 @@ class RTMPoseAnalyzer:
                  model_name: str = "rtmpose-m",
                  input_size: Tuple[int, int] = (256, 192),
                  use_3d: bool = False,
-                 enable_detection: bool = True):
+                 enable_detection: bool = True,
+                 show_detection_bbox: bool = False):
         """
         Initialize RTMPose analyzer with GPU optimization.
         
@@ -58,6 +59,7 @@ class RTMPoseAnalyzer:
             input_size: Model input resolution (width, height)
             use_3d: Enable 3D pose estimation (default: False for 2D)
             enable_detection: Enable person detection for better 2D overlay (default: True)
+            show_detection_bbox: Show detection bounding boxes on 2D overlay for debugging (default: False)
         """
         self.use_gpu_encoding = use_gpu_encoding
         self.frame_skip = frame_skip
@@ -65,6 +67,9 @@ class RTMPoseAnalyzer:
         self.input_size = input_size
         self.use_3d = use_3d
         self.enable_detection = enable_detection
+        # Check environment variable for bbox debugging override
+        env_show_bbox = os.getenv('SHOW_DETECTION_BBOX', '').lower() == 'true'
+        self.show_detection_bbox = show_detection_bbox or env_show_bbox
         
         # Performance tracking
         self.total_frames_processed = 0
@@ -432,13 +437,22 @@ class RTMPoseAnalyzer:
             if self.is_rtmpose3d and keypoints:
                 raw_keypoints = keypoints  # Store the original world coordinates
             
+            # Convert detected_bbox to list if it exists for storage in FrameAnalysis
+            bbox_for_storage = None
+            if detected_bbox is not None:
+                if hasattr(detected_bbox, 'tolist'):
+                    bbox_for_storage = detected_bbox.tolist()
+                elif isinstance(detected_bbox, (list, tuple)):
+                    bbox_for_storage = list(detected_bbox)
+            
             return FrameAnalysis(
                 frame_number=frame_idx,
                 timestamp_ms=timestamp * 1000,  # Convert to milliseconds
                 pose_detected=poses_detected > 0,  # Convert to boolean
                 landmarks=landmarks,
                 confidence_score=avg_confidence,
-                raw_rtmpose_keypoints=raw_keypoints
+                raw_rtmpose_keypoints=raw_keypoints,
+                detected_bbox=bbox_for_storage
             )
             
         except Exception as e:
@@ -1290,6 +1304,23 @@ class RTMPoseAnalyzer:
             legend_text = "Depth: Brighter/Larger = Closer"
             cv2.putText(frame, legend_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 
                        0.5, (255, 255, 255), 1)
+        
+        # Draw detection bounding box if available and debugging is enabled
+        if (self.show_detection_bbox and frame_analysis.detected_bbox is not None 
+            and len(frame_analysis.detected_bbox) == 4):
+            bbox = frame_analysis.detected_bbox
+            x1, y1, x2, y2 = bbox
+            
+            # Convert to integer pixel coordinates
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            
+            # Draw bounding box rectangle
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green color, 2px thickness
+            
+            # Add detection confidence label if available
+            bbox_label = "Detection"
+            cv2.putText(frame, bbox_label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 
+                       0.5, (0, 255, 0), 1)
         
         return frame
     
