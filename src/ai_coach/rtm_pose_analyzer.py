@@ -1119,18 +1119,42 @@ class RTMPoseAnalyzer:
             
             # Get video properties
             fps = cap.get(cv2.CAP_PROP_FPS)
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            
-            logger.info(f"📊 Video properties: {width}x{height} @ {fps}fps")
+            original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            logger.info(f"📊 Original video properties: {original_width}x{original_height} @ {fps}fps")
+
+            # Determine output dimensions based on visualizer mode
+            if self.use_demo_visualizer:
+                # For demo mode, we need to determine dimensions from the first processed frame
+                # Read first frame to get actual output dimensions
+                ret, first_frame = cap.read()
+                if not ret:
+                    logger.error("❌ Cannot read first frame to determine output dimensions")
+                    return False
+
+                # Process first frame to get actual output dimensions
+                processed_first_frame = self._process_frame_like_demo(first_frame)
+                output_height, output_width = processed_first_frame.shape[:2]
+
+                logger.info(f"📊 Demo visualizer output dimensions: {output_width}x{output_height} (side-by-side layout)")
+
+                # Reset video capture to beginning
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            else:
+                # For non-demo mode, use original dimensions
+                output_width = original_width
+                output_height = original_height
+                logger.info(f"📊 Standard overlay output dimensions: {output_width}x{output_height}")
+
             logger.info("⚡ Using RTMPose with direct FFmpeg piping")
-            
-            # Build FFmpeg command for direct piping
+
+            # Build FFmpeg command for direct piping with dynamic dimensions
             ffmpeg_cmd = [
                 'ffmpeg', '-y',  # Overwrite output
                 '-f', 'rawvideo',  # Input format
                 '-vcodec', 'rawvideo',
-                '-s', f'{width}x{height}',  # Size
+                '-s', f'{output_width}x{output_height}',  # Dynamic size based on visualizer output
                 '-pix_fmt', 'bgr24',  # OpenCV uses BGR
                 '-r', str(fps),  # Frame rate
                 '-i', '-',  # Read from stdin

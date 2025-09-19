@@ -145,11 +145,9 @@ class MMPoseVisualizer:
             if vis_frame is not None:
                 vis_frame_bgr = cv2.cvtColor(vis_frame, cv2.COLOR_RGB2BGR)
 
-                # Ensure consistent frame size to prevent scaling issues
-                # Resize to match original frame dimensions if needed
-                if vis_frame_bgr.shape[:2] != frame.shape[:2]:
-                    logger.debug(f"Resizing visualization from {vis_frame_bgr.shape[:2]} to {frame.shape[:2]}")
-                    vis_frame_bgr = cv2.resize(vis_frame_bgr, (frame.shape[1], frame.shape[0]))
+                # Preserve the natural side-by-side aspect ratio from MMPose demo visualizer
+                # Do not force resize to original frame dimensions as this squashes the layout
+                logger.debug(f"MMPose demo visualization output shape: {vis_frame_bgr.shape} (preserving aspect ratio)")
 
                 # Save if requested
                 if save_path:
