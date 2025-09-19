@@ -119,7 +119,7 @@ class WebSocketManager:
                     pass  # Will be cleaned up on next send attempt
 
 
-def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, create_video_overlay: bool = False, frame_skip: int = 3) -> FastAPI:
+def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, create_video_overlay: bool = False, frame_skip: int = 3, use_demo_visualizer: bool = False) -> FastAPI:
     """
     Create and configure FastAPI application.
     
@@ -128,6 +128,7 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
         use_gpu_encoding: Whether to use GPU acceleration for FFmpeg video encoding
         create_video_overlay: Whether to create video overlays (default: False for JSON-only)
         frame_skip: Analyze every Nth frame for performance (default: 3)
+        use_demo_visualizer: Whether to use MMPose demo-style side-by-side visualization
         
     Returns:
         Configured FastAPI app instance
@@ -152,13 +153,15 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
     # Initialize core components - use RTMPose if available, fallback to MediaPipe
     use_rtmpose = os.getenv('USE_RTMPOSE', 'true').lower() == 'true'
     use_3d = os.getenv('USE_3D_POSE', 'false').lower() == 'true'
+    use_demo_vis = use_demo_visualizer or os.getenv('USE_DEMO_VISUALIZER', 'false').lower() == 'true'
     
     if use_rtmpose:
         try:
             pose_analyzer = RTMPoseAnalyzer(
                 use_gpu_encoding=use_gpu_encoding, 
                 frame_skip=frame_skip,
-                use_3d=use_3d
+                use_3d=use_3d,
+                use_demo_visualizer=use_demo_vis
             )
             if use_3d:
                 logger.info("🚀 Using RTMPose analyzer with 3D pose estimation enabled")
@@ -169,7 +172,12 @@ def create_app(uploads_dir: str = "uploads", use_gpu_encoding: bool = False, cre
             raise RuntimeError(f"RTMPose required but failed to initialize: {e}")
     else:
         # Default to RTMPose with 3D support
-        pose_analyzer = RTMPoseAnalyzer(use_gpu_encoding=use_gpu_encoding, frame_skip=frame_skip, use_3d=use_3d)
+        pose_analyzer = RTMPoseAnalyzer(
+            use_gpu_encoding=use_gpu_encoding, 
+            frame_skip=frame_skip, 
+            use_3d=use_3d,
+            use_demo_visualizer=use_demo_vis
+        )
     video_processor = VideoProcessor(
         uploads_dir=uploads_dir, 
         pose_analyzer=pose_analyzer, 

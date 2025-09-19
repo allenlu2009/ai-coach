@@ -100,6 +100,8 @@ def main():
 						   help='Enable 3D pose estimation (default: 2D pose detection)')
 		parser.add_argument('--show-bbox', action='store_true',
 						   help='Enable bounding box debugging visualization (shows detection boxes)')
+		parser.add_argument('--use-demo-visualizer', action='store_true',
+						   help='Use MMPose demo-style side-by-side 2D/3D visualization instead of overlay')
 		parser.add_argument('--host', default='127.0.0.1', 
 						   help='Host to bind the server to (default: 127.0.0.1)')
 		parser.add_argument('--port', type=int, default=8000,
@@ -124,6 +126,12 @@ def main():
 			os.environ['SHOW_DETECTION_BBOX'] = 'true'
 		else:
 			os.environ['SHOW_DETECTION_BBOX'] = 'false'
+			
+		# Set demo visualizer environment variable
+		if args.use_demo_visualizer:
+			os.environ['USE_DEMO_VISUALIZER'] = 'true'
+		else:
+			os.environ['USE_DEMO_VISUALIZER'] = 'false'
 
 		# Ensure uploads directory exists (use project-local uploads folder)
 		uploads_dir = Path(__file__).parent / "uploads"
@@ -135,6 +143,7 @@ def main():
 		print(f"🔧 OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS={os.getenv('OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS')}")
 		print(f"🔮 USE_3D_POSE={os.getenv('USE_3D_POSE')}")
 		print(f"📦 SHOW_DETECTION_BBOX={os.getenv('SHOW_DETECTION_BBOX')}")
+		print(f"🎭 USE_DEMO_VISUALIZER={os.getenv('USE_DEMO_VISUALIZER')}")
 
 		# Start background watcher to help diagnose final video files produced at runtime
 		watcher = threading.Thread(target=_watch_uploads_dir, args=(uploads_dir,), daemon=True)
@@ -164,6 +173,11 @@ def main():
 			print("📦 Bounding box debugging enabled - detection boxes will be visible")
 		else:
 			print("🔍 Bounding box debugging disabled - use --show-bbox to enable detection visualization")
+			
+		if args.use_demo_visualizer:
+			print("🎭 MMPose demo-style side-by-side visualization enabled")
+		else:
+			print("🖼️ Standard overlay visualization - use --use-demo-visualizer for side-by-side panels")
 
 		# Import the app creation function and pass all optimization parameters
 		from ai_coach.api import create_app
@@ -171,7 +185,8 @@ def main():
 			uploads_dir=str(uploads_dir), 
 			use_gpu_encoding=args.gpu_encoding,
 			create_video_overlay=args.create_video,
-			frame_skip=args.frame_skip
+			frame_skip=args.frame_skip,
+			use_demo_visualizer=args.use_demo_visualizer
 		)
 
 		# Run with the configured app instance

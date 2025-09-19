@@ -86,6 +86,10 @@ class FrameAnalysis(BaseModel):
         default=None,
         description="MMDetection bounding box [x1, y1, x2, y2] for debugging visualization"
     )
+    raw_mmpose_results: Optional[Any] = Field(
+        default=None,
+        description="Raw MMPose results for demo-style visualization (opaque data)"
+    )
     
     @field_validator("landmarks")
     @classmethod
