@@ -26,6 +26,7 @@ from .models import (
     ProcessingStatus
 )
 from .pose_3d_visualizer import Pose3DVisualizer
+from .mmpose_visualizer import MMPoseVisualizer
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,13 @@ class RTMPoseAnalyzer:
     
     def __init__(self, 
                  use_gpu_encoding: bool = False,
-                 frame_skip: int = 3,
+                 frame_skip: int = 12,
                  model_name: str = "rtmpose-m",
                  input_size: Tuple[int, int] = (256, 192),
                  use_3d: bool = False,
                  enable_detection: bool = True,
-                 show_detection_bbox: bool = False):
+                 show_detection_bbox: bool = False,
+                 use_demo_visualizer: bool = False):
         """
         Initialize RTMPose analyzer with GPU optimization.
         
@@ -60,6 +62,7 @@ class RTMPoseAnalyzer:
             use_3d: Enable 3D pose estimation (default: False for 2D)
             enable_detection: Enable person detection for better 2D overlay (default: True)
             show_detection_bbox: Show detection bounding boxes on 2D overlay for debugging (default: False)
+            use_demo_visualizer: Use MMPose's demo-style side-by-side 2D/3D visualization (default: False)
         """
         self.use_gpu_encoding = use_gpu_encoding
         self.frame_skip = frame_skip
@@ -70,6 +73,7 @@ class RTMPoseAnalyzer:
         # Check environment variable for bbox debugging override
         env_show_bbox = os.getenv('SHOW_DETECTION_BBOX', '').lower() == 'true'
         self.show_detection_bbox = show_detection_bbox or env_show_bbox
+        self.use_demo_visualizer = use_demo_visualizer
         
         # Performance tracking
         self.total_frames_processed = 0
@@ -81,16 +85,26 @@ class RTMPoseAnalyzer:
         self.detector = None  # MMDetection model for person detection
         self.model_initialized = False
         self.is_rtmpose3d = False  # Track if using real RTMPose3D model
+        self._last_raw_pose_results = None  # Store raw inference results for MMPose visualizer
         
         # Thread pool for CPU-intensive operations
         self.thread_pool = ThreadPoolExecutor(max_workers=2)
         
-        # Initialize 3D visualizer for RTMPose3D mode
-        if self.use_3d:
-            self.pose_3d_visualizer = Pose3DVisualizer()
-            logger.info("🎭 3D pose visualizer initialized for side-by-side rendering")
-        else:
+        # Initialize visualizers based on mode
+        if self.use_3d and self.use_demo_visualizer:
+            # Use MMPose's demo-style visualizer for side-by-side 2D/3D panels
+            self.mmpose_visualizer = MMPoseVisualizer()
             self.pose_3d_visualizer = None
+            logger.info("🎭 MMPose demo-style visualizer initialized for side-by-side 2D/3D rendering")
+        elif self.use_3d:
+            # Use custom 3D visualizer for overlay mode
+            self.pose_3d_visualizer = Pose3DVisualizer()
+            self.mmpose_visualizer = None
+            logger.info("🎭 3D pose visualizer initialized for overlay rendering")
+        else:
+            # 2D mode
+            self.pose_3d_visualizer = None
+            self.mmpose_visualizer = None
         
         logger.info(f"RTMPoseAnalyzer initialized - model: {model_name}, input_size: {input_size}, frame_skip: {frame_skip}, 3D: {use_3d}")
     
@@ -223,6 +237,14 @@ class RTMPoseAnalyzer:
                     logger.warning(f"MMDetection initialization failed: {det_error}")
                     logger.info("🔄 Using full-frame detection fallback")
                     self.detector = None
+            
+            # Initialize MMPose visualizer if in demo mode
+            if self.mmpose_visualizer is not None and self.is_rtmpose3d:
+                success = self.mmpose_visualizer.initialize_models(self.pose3d_model, self.detector)
+                if success:
+                    logger.info("✅ MMPose demo visualizer initialized successfully")
+                else:
+                    logger.warning("⚠️ MMPose demo visualizer initialization failed")
             
             self.model_initialized = True
             logger.info(f"✅ RTMPose model initialized successfully")
@@ -408,12 +430,13 @@ class RTMPoseAnalyzer:
                             primary_pose = pose_predictions[0]  # Use the first detected person
                             
                             if isinstance(primary_pose, dict) and 'keypoints' in primary_pose:
-                                # For RTMPose3D, use original pixel coordinates for 2D overlay
+                                # For RTMPose3D, use original pixel coordinates for 2D overlay, transformed coordinates for 3D analysis
                                 if self.is_rtmpose3d and 'keypoints_2d_overlay' in primary_pose:
-                                    keypoints = primary_pose['keypoints_2d_overlay']  # Original pixel coordinates
-                                    logger.info("🎯 Using RTMPose3D original coordinates for 2D overlay")
+                                    keypoints = primary_pose['keypoints_2d_overlay']  # Original pixel coordinates for 2D overlay
+                                    logger.info("🎯 Using RTMPose3D original pixel coordinates for 2D overlay")
                                 else:
-                                    keypoints = primary_pose['keypoints']  # Standard coordinates
+                                    keypoints = primary_pose['keypoints']  # Standard coordinates or fallback
+                                    logger.info("🎯 Using standard keypoints for 2D overlay")
                                     
                                 keypoint_scores = primary_pose.get('keypoint_scores', [])
                                 detected_bbox = primary_pose.get('detected_bbox', None)  # Get detection bbox if available
@@ -544,54 +567,12 @@ class RTMPoseAnalyzer:
                             norm_y = y  # Keep world Y coordinate
                             logger.debug(f"RTMPose3D 3D viz coords: world({x:.3f},{y:.3f}) -> preserved({norm_x:.3f},{norm_y:.3f})")
                         else:
-                            # 2D Overlay: Convert world coordinates to image coordinates
-                            # Enhanced with detection-based positioning
-                            
-                            if detected_bbox is not None and len(detected_bbox) == 4:
-                                # Use detected bounding box for accurate positioning
-                                bbox_x1, bbox_y1, bbox_x2, bbox_y2 = detected_bbox
-                                bbox_center_x = (bbox_x1 + bbox_x2) / 2
-                                bbox_center_y = (bbox_y1 + bbox_y2) / 2
-                                bbox_width = bbox_x2 - bbox_x1
-                                bbox_height = bbox_y2 - bbox_y1
-                                
-                                # Use bbox-relative coordinates with RTMPose3D world coordinates
-                                rtm_x_range = 2.827 - 1.653  # ~1.17
-                                rtm_y_range = 0.251 - (-1.330)  # ~1.58
-                                rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
-                                rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
-                                
-                                # Map to bbox coordinate system
-                                # Use 80% of bbox size to avoid edge clipping
-                                person_scale_x = bbox_width * 0.8
-                                person_scale_y = bbox_height * 0.8
-                                
-                                # Map RTMPose3D coordinates to bbox-relative pixel coordinates
-                                pixel_x = bbox_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
-                                pixel_y = bbox_center_y + ((y - rtm_y_center) / rtm_y_range) * person_scale_y
-                                
-                                logger.debug(f"RTMPose3D with detection: world({x:.3f},{y:.3f}) -> bbox({bbox_center_x:.1f},{bbox_center_y:.1f}) -> pixel({pixel_x:.1f},{pixel_y:.1f})")
-                                
-                            else:
-                                # Fallback to fixed image-relative positioning
-                                person_center_x = width * 0.5   # Center horizontally
-                                person_center_y = height * 0.55  # Slightly below center vertically
-                                
-                                # RTMPose3D coordinate ranges observed from testing
-                                rtm_x_range = 2.827 - 1.653  # ~1.17
-                                rtm_y_range = 0.251 - (-1.330)  # ~1.58
-                                rtm_x_center = (2.827 + 1.653) / 2  # ~2.24
-                                rtm_y_center = (0.251 + (-1.330)) / 2  # ~-0.54
-                                
-                                # Use moderate scaling for fallback
-                                person_scale_x = width * 0.25   # Person width ~25% of image
-                                person_scale_y = height * 0.6   # Person height ~60% of image
-                                
-                                # Map RTMPose3D coordinates to image coordinates
-                                pixel_x = person_center_x + ((x - rtm_x_center) / rtm_x_range) * person_scale_x
-                                pixel_y = person_center_y + ((y - rtm_y_center) / rtm_y_range) * person_scale_y  
-                                
-                                logger.debug(f"RTMPose3D fallback: world({x:.3f},{y:.3f}) -> pixel({pixel_x:.1f},{pixel_y:.1f})")
+                            # 2D Overlay: Use the corrected full-image pixel coordinates directly
+                            # RTMPose3D: Use original full-image pixel coordinates for 2D overlay
+                            # The transformed coordinates (-keypoints[..., [0, 2, 1]]) are stored separately for 3D analysis
+                            # This approach provides accurate 2D overlay while maintaining proper 3D coordinate system
+                            pixel_x = x
+                            pixel_y = y
                             
                             # Clamp to valid image bounds and normalize
                             pixel_x = max(0, min(width-1, pixel_x))
@@ -599,6 +580,8 @@ class RTMPoseAnalyzer:
                             
                             norm_x = pixel_x / width
                             norm_y = pixel_y / height
+                            
+                            logger.debug(f"RTMPose3D 2D overlay coords: pixel({pixel_x:.1f},{pixel_y:.1f}) -> norm({norm_x:.3f},{norm_y:.3f})")
                     else:
                         # Standard RTMPose coordinates - assume already in pixel space
                         norm_x = x / width if width > 0 else 0.0
@@ -784,6 +767,9 @@ class RTMPoseAnalyzer:
             # Run 3D pose estimation  
             pose_results = inference_topdown(self.pose3d_model, frame, bboxes)
             
+            # Store raw results for MMPose demo visualizer
+            self._last_raw_pose_results = pose_results
+            
             # Convert results using RTMPose3D's expected post-processing
             formatted_results = []
             if pose_results and len(pose_results) > 0:
@@ -808,36 +794,86 @@ class RTMPoseAnalyzer:
                         if keypoints.ndim == 4:
                             keypoints = np.squeeze(keypoints, axis=1)
                         
-                        # Store original keypoints for 2D overlay (pixel coordinates)
-                        original_keypoints = keypoints.copy()
+                        # Store original keypoints before any transformation
+                        crop_space_keypoints = keypoints.copy()
                         
-                        # Apply RTMPose3D coordinate transformation for 3D analysis
-                        # Following official demo: -keypoints[..., [0, 2, 1]]
-                        if keypoints.shape[-1] >= 3:
-                            # Apply the standard RTMPose3D coordinate transformation
-                            keypoints = -keypoints[..., [0, 2, 1]]
+                        # Follow the exact demo implementation: coordinates from inference_topdown are in crop space
+                        # and need to be transformed back to full image coordinates for 2D overlay
+                        full_image_keypoints = crop_space_keypoints.copy()
+                        
+                        if len(bboxes) > 0 and idx < len(bboxes):
+                            # Get the bounding box that was used for this pose result
+                            bbox = bboxes[idx] if idx < len(bboxes) else bboxes[0]
+                            x1, y1, x2, y2 = bbox
+                            
+                            # The inference_topdown function rescales and crops the region to model input size
+                            # Then the model outputs coordinates relative to that cropped/rescaled region
+                            # We need to transform these back to the original full image coordinates
+                            
+                            # For 2D overlay: use the original keypoints without the demo's 3D transformation
+                            # The keypoints are in the coordinate space of the cropped and resized image region
+                            # that was fed to the model. Transform them back to full image space.
+                            
+                            for kpt_idx in range(full_image_keypoints.shape[1]):
+                                if full_image_keypoints.shape[2] >= 2:  # Has x, y coordinates
+                                    # Get coordinates in crop space
+                                    crop_x = crop_space_keypoints[0, kpt_idx, 0]
+                                    crop_y = crop_space_keypoints[0, kpt_idx, 1]
+                                    
+                                    # RTMPose3D outputs coordinates in normalized model space, not pixel coordinates
+                                    # Need to transform from model space to image pixel coordinates
+                                    # Based on MMPose visualizer approach
+                                    
+                                    bbox_width = x2 - x1
+                                    bbox_height = y2 - y1
+                                    bbox_center_x = (x1 + x2) / 2
+                                    bbox_center_y = (y1 + y2) / 2
+                                    
+                                    # The scale factor is crucial - RTMPose3D uses a normalized coordinate system
+                                    # Typical model space ranges around [-2, 2] and we map to bbox size
+                                    scale_factor = max(bbox_width, bbox_height) / 4.0  # Adjust based on model output range
+                                    
+                                    full_x = bbox_center_x + (crop_x * scale_factor)
+                                    full_y = bbox_center_y + (crop_y * scale_factor)
+                                    
+                                    full_image_keypoints[0, kpt_idx, 0] = full_x
+                                    full_image_keypoints[0, kpt_idx, 1] = full_y
+                                    
+                                    if kpt_idx < 5:  # Debug first 5 keypoints
+                                        logger.debug(f"Keypoint {kpt_idx}: crop({crop_x:.1f},{crop_y:.1f}) -> full({full_x:.1f},{full_y:.1f})")
+                        
+                        logger.debug(f"RTMPose3D raw coordinates: {crop_space_keypoints[0, :5, :2]}")
+                        logger.debug(f"Transformed coordinates: {full_image_keypoints[0, :5, :2]}")
+                        
+                        # Apply RTMPose3D coordinate transformation exactly like the demo
+                        # Following official demo line 219: keypoints = -keypoints[..., [0, 2, 1]]
+                        # BUT: Keep both original full-image coordinates for 2D overlay AND transformed coordinates for 3D analysis
+                        transformed_keypoints = crop_space_keypoints.copy()
+                        if transformed_keypoints.shape[-1] >= 3:
+                            # Apply the standard RTMPose3D coordinate transformation for 3D analysis
+                            transformed_keypoints = -transformed_keypoints[..., [0, 2, 1]]
                             
                             # Optional: rebase height (z-axis) to ground level
-                            # Following the official demo's approach
-                            keypoints[..., 2] -= np.min(keypoints[..., 2], axis=-1, keepdims=True)
+                            # Following the official demo's approach (lines 222-224)
+                            transformed_keypoints[..., 2] -= np.min(transformed_keypoints[..., 2], axis=-1, keepdims=True)
                         
                         # Take first person and format for our pipeline
-                        if keypoints.shape[0] > 0:
-                            person_keypoints = keypoints[0]  # Shape: [K, 3] - transformed 3D coordinates
-                            original_person_keypoints = original_keypoints[0]  # Shape: [K, 3] - original pixel coordinates
+                        if crop_space_keypoints.shape[0] > 0:
+                            # Use transformed coordinates for 3D analysis but keep original for 2D overlay
+                            person_keypoints_3d = transformed_keypoints[0]  # Shape: [K, 3] - transformed for 3D analysis
+                            person_keypoints_2d = full_image_keypoints[0]  # Shape: [K, 3] - original pixel coordinates for 2D overlay
                             person_scores = keypoint_scores[0] if keypoint_scores.ndim > 1 else keypoint_scores
                             
                             # Ensure we have the right number of scores
-                            if len(person_scores) != len(person_keypoints):
-                                person_scores = [0.8] * len(person_keypoints)  # Default confidence
+                            if len(person_scores) != len(person_keypoints_3d):
+                                person_scores = [0.8] * len(person_keypoints_3d)  # Default confidence
                             
                             # Format as expected by downstream processing
-                            # Include both original (for 2D overlay) and transformed (for 3D analysis) coordinates
-                            # Also include the detected bounding box for improved 2D overlay
+                            # Store both coordinate systems: transformed for 3D, original for 2D overlay
                             formatted_result = {
                                 'predictions': [[{
-                                    'keypoints': person_keypoints.tolist(),  # 3D transformed coordinates
-                                    'keypoints_2d_overlay': original_person_keypoints.tolist(),  # Original pixel coordinates for overlay
+                                    'keypoints': person_keypoints_3d.tolist(),  # Transformed coordinates for 3D analysis
+                                    'keypoints_2d_overlay': person_keypoints_2d.tolist(),  # Original pixel coordinates for 2D overlay
                                     'keypoint_scores': person_scores.tolist() if hasattr(person_scores, 'tolist') else list(person_scores),
                                     'detected_bbox': bboxes[0].tolist() if len(bboxes) > 0 else None  # Store first detected bbox
                                 }]]
@@ -1129,16 +1165,21 @@ class RTMPoseAnalyzer:
             
             frame_count = 0
             frame_analyses = {fa.frame_number: fa for fa in analysis.frame_analyses}
-            
+
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                
-                # Draw RTMPose overlay if we have analysis for this frame
-                if frame_count in frame_analyses:
-                    frame_analysis = frame_analyses[frame_count]
-                    frame = self._draw_rtmpose_overlay(frame, frame_analysis)
+
+                # DEMO MODE: Process every frame individually like the official demo
+                if self.use_demo_visualizer:
+                    # Follow demo approach: fresh analysis for EVERY frame
+                    frame = self._process_frame_like_demo(frame)
+                else:
+                    # Original approach: use cached analysis with frame mapping
+                    frame_analysis = self._get_closest_frame_analysis(frame_count, frame_analyses)
+                    if frame_analysis:
+                        frame = self._draw_rtmpose_overlay(frame, frame_analysis)
                 
                 # Write frame to FFmpeg
                 try:
@@ -1167,6 +1208,53 @@ class RTMPoseAnalyzer:
         except Exception as e:
             logger.error(f"❌ RTMPose video overlay creation failed: {e}")
             return False
+
+    def _get_closest_frame_analysis(self, frame_count: int, frame_analyses: Dict[int, FrameAnalysis]) -> Optional[FrameAnalysis]:
+        """
+        Get the closest analyzed frame for the current frame count with improved interpolation.
+
+        This fixes the video synchronization issue by finding the temporally closest
+        analyzed frame, whether before or after the current frame.
+
+        Args:
+            frame_count: Current video frame number
+            frame_analyses: Dictionary mapping frame numbers to analyses
+
+        Returns:
+            FrameAnalysis for the closest analyzed frame, or None if not found
+        """
+        if not frame_analyses:
+            return None
+
+        # Check if we have exact match (best case)
+        if frame_count in frame_analyses:
+            return frame_analyses[frame_count]
+
+        # Find closest analyzed frame by minimum distance
+        analyzed_frames = sorted(frame_analyses.keys())
+
+        # Find the frame with minimum temporal distance
+        min_distance = float('inf')
+        closest_frame = None
+
+        for analyzed_frame in analyzed_frames:
+            distance = abs(analyzed_frame - frame_count)
+            if distance < min_distance:
+                min_distance = distance
+                closest_frame = analyzed_frame
+
+        # Additional logic: prefer slightly future frames for better sync
+        # when distances are equal (helps with lag compensation)
+        if closest_frame is not None:
+            for analyzed_frame in analyzed_frames:
+                distance = abs(analyzed_frame - frame_count)
+                if (distance == min_distance and
+                    analyzed_frame > frame_count and
+                    analyzed_frame - frame_count <= self.frame_skip // 2):
+                    closest_frame = analyzed_frame
+                    break
+
+        return frame_analyses.get(closest_frame) if closest_frame is not None else None
     
     def _draw_rtmpose_overlay(self, frame: np.ndarray, frame_analysis: FrameAnalysis) -> np.ndarray:
         """
@@ -1177,14 +1265,221 @@ class RTMPoseAnalyzer:
             frame_analysis: Frame analysis with pose landmarks
             
         Returns:
-            Frame with 2D pose overlay drawn
+            Frame with 2D pose overlay drawn, or MMPose demo-style side-by-side visualization
         """
         if not frame_analysis.pose_detected or not frame_analysis.landmarks:
             return frame
+        
+        # Use MMPose demo visualizer if enabled and initialized
+        if (self.use_demo_visualizer and 
+            self.mmpose_visualizer is not None and 
+            self.mmpose_visualizer.initialized):
             
-        # Always use 2D overlay for video - 3D visualization is handled separately
-        return self._draw_2d_pose_overlay(frame, frame_analysis)
+            try:
+                # CRITICAL FIX: Run fresh pose analysis for this specific frame to avoid sync issues
+                # The problem was using cached _last_raw_pose_results which caused flying wires
+                fresh_pose_results = self._run_fresh_pose_analysis_for_frame(frame)
+
+                if fresh_pose_results is not None and len(fresh_pose_results) > 0:
+                    # Use the fresh MMPose results for demo visualization
+                    vis_frame = self.mmpose_visualizer.process_and_visualize(
+                        frame,
+                        fresh_pose_results
+                    )
+                    if vis_frame is not None:
+                        logger.debug("✅ MMPose demo visualization with fresh analysis successful")
+                        return vis_frame
+                    else:
+                        logger.debug("⚠️ MMPose demo visualization returned None, using cached analysis for 2D overlay")
+                else:
+                    logger.debug("⚠️ Fresh pose analysis failed or returned no results, using cached analysis for 2D overlay")
+            except Exception as e:
+                logger.warning(f"MMPose demo visualization failed: {e}, using cached analysis for 2D overlay")
+
+        # BETTER FALLBACK: Use the MMPose visualizer with cached frame analysis
+        # This ensures consistent demo-style visualization even when fresh analysis fails
+        if frame_analysis and frame_analysis.pose_detected and frame_analysis.landmarks:
+            try:
+                # Convert cached frame analysis back to MMPose format for consistent visualization
+                fallback_pose_results = self._create_mmpose_results_from_frame_analysis(frame_analysis, frame)
+                if fallback_pose_results:
+                    vis_frame = self.mmpose_visualizer.process_and_visualize(frame, fallback_pose_results)
+                    if vis_frame is not None:
+                        logger.debug("✅ Using cached frame analysis with demo visualizer")
+                        return vis_frame
+
+                # If MMPose visualizer fails with cached data, use 2D overlay
+                logger.debug("MMPose visualizer failed with cached data, using 2D overlay")
+                return self._draw_2d_pose_overlay(frame, frame_analysis)
+
+            except Exception as e:
+                logger.warning(f"Fallback visualization failed: {e}, using 2D overlay")
+                return self._draw_2d_pose_overlay(frame, frame_analysis)
+        else:
+            # No pose data at all - return original frame
+            logger.debug("⚠️ No pose data available for frame, returning original frame")
+            return frame
     
+    def _run_fresh_pose_analysis_for_frame(self, frame: np.ndarray):
+        """
+        Run fresh RTMPose3D analysis for a specific frame to avoid synchronization issues.
+        
+        This method performs the same analysis as _run_rtmpose3d_inference but only for
+        the given frame, ensuring frame-by-frame synchronization for demo visualizer.
+        
+        Args:
+            frame: Input video frame
+            
+        Returns:
+            Raw pose results from inference_topdown, or None if failed
+        """
+        if not self.model_initialized or self.pose3d_model is None:
+            logger.warning("RTMPose3D model not initialized for fresh analysis")
+            return None
+            
+        try:
+            from mmpose.apis import inference_topdown
+            import numpy as np
+            
+            # Use detection if available, otherwise fall back to full-frame
+            if self.detector is not None and self.enable_detection:
+                bboxes = self._detect_persons(frame)
+                if len(bboxes) == 0:
+                    # No persons detected, use full frame as fallback
+                    height, width = frame.shape[:2]
+                    bboxes = np.array([[0, 0, width, height]], dtype=np.float32)
+                    logger.debug("Fresh analysis: No persons detected, using full-frame fallback")
+            else:
+                # Create a full-frame bounding box as numpy array (required format)
+                height, width = frame.shape[:2]
+                # RTMPose3D expects bboxes in format: [[x1, y1, x2, y2], ...] (no score)
+                bboxes = np.array([[0, 0, width, height]], dtype=np.float32)
+            
+            # Run 3D pose estimation for this specific frame
+            pose_results = inference_topdown(self.pose3d_model, frame, bboxes)
+            
+            if pose_results and len(pose_results) > 0:
+                logger.debug(f"✅ Fresh analysis successful: {len(pose_results)} pose results")
+                return pose_results
+            else:
+                logger.debug("⚠️ Fresh analysis returned no pose results")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Fresh pose analysis failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+
+    def _process_frame_like_demo(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Process frame exactly like the official demo - fresh analysis + visualization for EVERY frame.
+
+        This matches the demo's approach:
+        1. Run fresh pose detection for this frame
+        2. Apply demo visualization
+        3. Return visualization result
+
+        Args:
+            frame: Input video frame
+
+        Returns:
+            Processed frame with demo-style visualization
+        """
+        if not self.mmpose_visualizer or not self.mmpose_visualizer.initialized:
+            logger.warning("MMPose visualizer not initialized, returning original frame")
+            return frame
+
+        try:
+            # Step 1: Fresh pose analysis for this frame (matches demo's process_one_image call)
+            fresh_pose_results = self._run_fresh_pose_analysis_for_frame(frame)
+
+            if fresh_pose_results and len(fresh_pose_results) > 0:
+                # Step 2: Apply demo visualization (matches demo's visualizer.add_datasample + get_image)
+                vis_frame = self.mmpose_visualizer.process_and_visualize(frame, fresh_pose_results)
+
+                if vis_frame is not None:
+                    return vis_frame
+                else:
+                    logger.debug("Demo visualization failed, returning original frame")
+                    return frame
+            else:
+                # No pose detected - return original frame (same as demo when no detections)
+                logger.debug("No pose detected in frame, returning original frame")
+                return frame
+
+        except Exception as e:
+            logger.warning(f"Demo-style frame processing failed: {e}, returning original frame")
+            return frame
+
+    def _create_mmpose_results_from_frame_analysis(self, frame_analysis: FrameAnalysis, frame: np.ndarray):
+        """
+        Convert cached FrameAnalysis back to MMPose format for consistent demo visualization.
+
+        Args:
+            frame_analysis: Cached frame analysis with pose landmarks
+            frame: Original video frame
+
+        Returns:
+            MMPose-compatible results list or None if conversion fails
+        """
+        try:
+            if not frame_analysis.landmarks or not frame_analysis.pose_detected:
+                return None
+
+            # Import required MMPose structures
+            from mmpose.structures import PoseDataSample
+            from mmengine.structures import InstanceData
+            import torch
+
+            # Convert our landmarks back to RTMPose3D format
+            keypoints_list = []
+            scores_list = []
+
+            for landmark in frame_analysis.landmarks:
+                # Convert normalized coordinates back to pixel coordinates if needed
+                if landmark.x <= 1.0 and landmark.y <= 1.0:  # Normalized coordinates
+                    x = landmark.x * frame.shape[1]
+                    y = landmark.y * frame.shape[0]
+                else:  # Already pixel coordinates
+                    x = landmark.x
+                    y = landmark.y
+
+                z = landmark.z  # Keep Z coordinate as-is
+                keypoints_list.append([x, y, z])
+                scores_list.append(landmark.visibility)
+
+            # Convert to numpy arrays
+            keypoints = np.array(keypoints_list, dtype=np.float32)
+            scores = np.array(scores_list, dtype=np.float32)
+
+            # Apply the coordinate transformation to match what fresh analysis would produce
+            # This ensures consistency between fresh and cached analysis
+            keypoints_transformed = -keypoints[:, [0, 2, 1]]
+
+            # Rebase Z to ground level
+            if keypoints_transformed.shape[-1] >= 3:
+                keypoints_transformed[:, 2] -= np.min(keypoints_transformed[:, 2])
+
+            # Create MMPose data structures
+            pred_instances = InstanceData()
+            pred_instances.keypoints = torch.from_numpy(keypoints_transformed[None, :, :])  # Add batch dimension
+            pred_instances.keypoint_scores = torch.from_numpy(scores[None, :])  # Add batch dimension
+
+            # Create PoseDataSample
+            pose_sample = PoseDataSample()
+            pose_sample.pred_instances = pred_instances
+            pose_sample.track_id = 1
+
+            logger.debug(f"✅ Converted frame analysis to MMPose format: {keypoints_transformed.shape}")
+            return [pose_sample]
+
+        except Exception as e:
+            logger.error(f"Failed to convert frame analysis to MMPose format: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
+
     def _draw_2d_pose_overlay(self, frame: np.ndarray, frame_analysis: FrameAnalysis) -> np.ndarray:
         """
         Draw 2D pose overlay on frame (extracted from original _draw_rtmpose_overlay).
@@ -1202,42 +1497,20 @@ class RTMPoseAnalyzer:
         # Draw pose landmarks and connections
         height, width = frame.shape[:2]
         
-        # Convert landmarks to pixel coordinates with bbox-based transformation
+        # Convert landmarks to pixel coordinates 
+        # NOTE: For RTMPose3D, coordinates are already processed through proper transformation
+        # in the _convert_rtmpose_keypoints method, so we just need to extract them
         pose_points = []
         pose_depths = []
         
-        # Check if we have bounding box information for accurate transformation
-        if (frame_analysis.detected_bbox is not None and 
-            len(frame_analysis.detected_bbox) == 4):
-            # Use bounding box for coordinate transformation
-            bbox = frame_analysis.detected_bbox
-            bbox_x1, bbox_y1, bbox_x2, bbox_y2 = bbox
-            bbox_width = bbox_x2 - bbox_x1
-            bbox_height = bbox_y2 - bbox_y1
-            
-            for landmark in frame_analysis.landmarks:
-                # RTMPose landmarks are relative to the cropped bbox region
-                # Transform from crop coordinates to full image coordinates
-                if landmark.x <= 1.0 and landmark.y <= 1.0:
-                    # Normalized coordinates (0-1) relative to bbox
-                    x = int(bbox_x1 + landmark.x * bbox_width)
-                    y = int(bbox_y1 + landmark.y * bbox_height)
-                else:
-                    # Already in bbox pixel coordinates, transform to full image
-                    x = int(bbox_x1 + landmark.x)
-                    y = int(bbox_y1 + landmark.y)
-                
-                z = landmark.z  # Keep original 3D depth coordinate
-                pose_points.append((x, y))
-                pose_depths.append(z)
-        else:
-            # Fallback to simple coordinate conversion (original method)
-            for landmark in frame_analysis.landmarks:
-                x = int(landmark.x * width) if landmark.x <= 1.0 else int(landmark.x)
-                y = int(landmark.y * height) if landmark.y <= 1.0 else int(landmark.y)
-                z = landmark.z  # Keep original 3D depth coordinate
-                pose_points.append((x, y))
-                pose_depths.append(z)
+        for landmark in frame_analysis.landmarks:
+            # RTMPose landmarks should already be in correct pixel coordinates
+            # after processing through _convert_rtmpose_keypoints
+            x = int(landmark.x) if landmark.x > 1.0 else int(landmark.x * width)
+            y = int(landmark.y) if landmark.y > 1.0 else int(landmark.y * height)
+            z = landmark.z  # Keep original 3D depth coordinate
+            pose_points.append((x, y))
+            pose_depths.append(z)
         
         # Draw pose connections using MediaPipe landmark indices
         # (RTMPose keypoints are converted to MediaPipe format in _convert_rtmpose_keypoints)

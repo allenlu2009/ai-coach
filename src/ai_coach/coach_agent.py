@@ -266,14 +266,29 @@ class CoachAgent:
             
             # Calculate consistency as inverse of angle variance
             consistency_scores = []
-            
+
             for angles in [left_knee_angles, right_knee_angles]:
                 if len(angles) > 5:
-                    angle_variance = np.var(angles)
-                    consistency = 1.0 / (1.0 + angle_variance)
-                    consistency_scores.append(consistency)
-            
-            return np.mean(consistency_scores) if consistency_scores else 0.5
+                    # Filter out any NaN values before calculating variance
+                    valid_angles = [angle for angle in angles if not np.isnan(angle)]
+
+                    if len(valid_angles) > 5:
+                        angle_variance = np.var(valid_angles)
+
+                        # Ensure variance is not NaN or infinite
+                        if np.isfinite(angle_variance):
+                            consistency = 1.0 / (1.0 + angle_variance)
+                            # Clamp consistency to valid range [0, 1]
+                            consistency = max(0.0, min(1.0, consistency))
+                            consistency_scores.append(consistency)
+
+            result = np.mean(consistency_scores) if consistency_scores else 0.5
+
+            # Final safety check for NaN/infinite values
+            if not np.isfinite(result):
+                return 0.5
+
+            return max(0.0, min(1.0, result))  # Clamp to [0, 1] range
             
         except Exception as e:
             logger.error(f"Error calculating joint consistency: {e}")
@@ -292,7 +307,14 @@ class CoachAgent:
             v2 = point3 - point2
             
             # Calculate angle
-            cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+            # Check for zero-length vectors to prevent division by zero
+            norm_v1 = np.linalg.norm(v1)
+            norm_v2 = np.linalg.norm(v2)
+
+            if norm_v1 == 0 or norm_v2 == 0:
+                return None  # Can't calculate angle for zero-length vectors
+
+            cos_angle = np.dot(v1, v2) / (norm_v1 * norm_v2)
             cos_angle = np.clip(cos_angle, -1.0, 1.0)  # Handle floating point errors
             
             return np.arccos(cos_angle)
