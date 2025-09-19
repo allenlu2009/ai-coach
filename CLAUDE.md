@@ -136,3 +136,4 @@ ruff format
 - **Implement conversational coaching** - Chat interface should provide meaningful athletic feedback
 - **Leverage GPU acceleration** - Use CUDA when available for faster video processing
 - **Support real-time analysis** - Design for responsive video processing and feedback
+- Always use 'mamba activate openmmlab' before run python command
